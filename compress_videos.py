@@ -4,15 +4,16 @@ import shutil
 import time
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import traceback
 
 # ===== ARCHIVIERUNGS-KONFIGURATION =====
 
 # Pfade relativ zum Skript-Standort
-SRC_DIR = Path("./videos_to_compress")
-DST_DIR = Path("./compressed_videos_limited_medium_21")
+SRC_DIR = Path("../Video Compression/videos_to_compress")
+DST_DIR = Path("../Video Compression/compressed_videos_limited_slow_crf20")
 
 # Bei 24 Threads und Archivierung (veryslow) sind 4 parallele Jobs ideal.
-MAX_JOBS = 4
+MAX_JOBS = 3
 
 # --- Auflösung & FPS ---
 LIMIT_RES = True   # Falls False, wird immer die Originalauflösung behalten
@@ -23,8 +24,8 @@ FPS_LIMIT = 30
 
 # --- Encoder Settings ---
 USE_LIBX265 = True  
-CRF_VALUE = 28      # 18-20 für Archivqualität
-PRESET = "fast" # Beste Kompressionseffizienz
+CRF_VALUE = 20      # 18-20 für Archivqualität
+PRESET = "slow" # Beste Kompressionseffizienz
 
 def format_size(size_bytes):
     """Formatiert Byte-Größen in lesbare Einheiten (MB/GB)."""
@@ -103,8 +104,16 @@ def process_video(src_path):
         
         # FILTER CHAIN AUFBAUEN
         filters = []
+        
+        #if LIMIT_RES:
+         #   filters.append(f"scale='if(gt(iw,ih),min({MAX_RESOLUTION},iw),-2)':'if(gt(iw,ih),-2,min({MAX_RESOLUTION},ih))':force_original_aspect_ratio=decrease")
         if LIMIT_RES:
-            filters.append(f"scale='if(gt(iw,ih),min({MAX_RESOLUTION},iw),-2)':'if(gt(iw,ih),-2,min({MAX_RESOLUTION},ih))':force_original_aspect_ratio=decrease")
+            # Die Ergänzung ':force_original_aspect_ratio=decrease' sorgt für die Einhaltung der Max-Größe
+            # Das anschließende ',setsar=1,scale=trunc(iw/2)*2:trunc(ih/2)*2' erzwingt gerade Pixelwerte
+            filters.append(
+                f"scale='if(gt(iw,ih),min({MAX_RESOLUTION},iw),-2)':'if(gt(iw,ih),-2,min({MAX_RESOLUTION},ih))':force_original_aspect_ratio=decrease,"
+                f"scale=trunc(iw/2)*2:trunc(ih/2)*2"
+            )
         if LIMIT_FPS and src_fps and src_fps > FPS_LIMIT:
             filters.append(f"fps=fps={FPS_LIMIT}")
         filters.append("format=yuv420p")
@@ -112,7 +121,9 @@ def process_video(src_path):
 
         # FFMPEG KOMMANDO (Absolut rauschfrei)
         ffmpeg_cmd = [
-            "ffmpeg", "-y", "-loglevel", "quiet", "-i", str(src_path),
+            "ffmpeg", "-y", 
+            "-loglevel", "quiet", 
+            "-i", str(src_path),
             "-vf", vf_chain, 
             "-c:a", "aac", "-b:a", "128k"
         ]
@@ -157,26 +168,35 @@ def process_video(src_path):
         return result_msg
     
     except Exception as e:
+        traceback.print_exception(e)
         return f"❌ FEHLER bei {src_path}: {str(e)}"
 
 def main():
     # Ordner erstellen, falls nicht vorhanden
     SRC_DIR.mkdir(parents=True, exist_ok=True)
     
-    video_files = sorted([p for p in SRC_DIR.rglob("*") if p.suffix.lower() in [".mov", ".mp4"]])
+    video_files = sorted([p for p in SRC_DIR.rglob("*") if p.suffix.lower() in [".mov", ".mp4", ".avi"]])
     
-    if not video_files:
+    total = len(video_files)
+    if total == 0:
         print(f"Keine Videos in {SRC_DIR.absolute()} gefunden.")
         return
 
-    print(f"🚀 Starte Archivierung von {len(video_files)} Videos...")
-    print(f"   Modus: x265 {PRESET} | {MAX_JOBS} parallele Jobs")
+    print(f"🚀 Starte Archivierung von {total} Videos...")
+    print(f"   Modus: x265 {PRESET}, CRF{CRF_VALUE} | {MAX_JOBS} parallele Jobs")
     print("-" * 60)
 
+
+    count = 0
     with ProcessPoolExecutor(max_workers=MAX_JOBS) as executor:
         futures = {executor.submit(process_video, f): f for f in video_files}
         for future in as_completed(futures):
-            print(future.result())
+            count += 1
+            
+            result_text = future.result()
+            
+            prefix = f"[{count}/{total}] "
+            print(f"{prefix}{result_text}")
             print("-" * 60)
 
     print("\n🏁 Archivierung abgeschlossen!")
