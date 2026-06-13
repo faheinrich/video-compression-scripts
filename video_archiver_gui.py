@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QMessageBox
 )
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot, Qt
+from PyQt5.QtGui import QIcon
 
 
 # ===== HILFSFUNKTIONEN =====
@@ -501,6 +502,12 @@ class ArchiverGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Video Compressor & Archiver Pro")
+        
+        # App-Icon setzen
+        icon_path = os.path.join(os.path.dirname(__file__), "imgs", "logo.png")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            
         self.resize(1050, 800)
         self.worker = None
         self.scan_worker = None
@@ -517,6 +524,20 @@ class ArchiverGUI(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        
+        # Header Area with Toggle Button
+        header_layout = QHBoxLayout()
+        header_layout.addStretch()
+        self.btn_toggle_config = QPushButton("⚙️ Konfigurationen ausblenden")
+        self.btn_toggle_config.setCheckable(True)
+        self.btn_toggle_config.clicked.connect(self.toggle_configurations)
+        header_layout.addWidget(self.btn_toggle_config)
+        main_layout.addLayout(header_layout)
+        
+        # Container for hidable configurations
+        self.config_container = QWidget()
+        config_layout = QVBoxLayout(self.config_container)
+        config_layout.setContentsMargins(0, 0, 0, 0)
         
         # 1. Sektion: Verzeichnisse
         folder_group = QGroupBox("Verzeichnis-Einstellungen")
@@ -540,13 +561,20 @@ class ArchiverGUI(QMainWindow):
             else:
                 self.txt_dst = txt
         
+        config_layout.addWidget(folder_group)
+        
+        # 2. Sektion: Dangerous Zone
+        dangerous_group = QGroupBox("⚠️ Gefahrenzone")
+        dangerous_group.setStyleSheet("QGroupBox { color: #c0392b; font-weight: bold; border: 1px solid #e74c3c; border-radius: 4px; margin-top: 10px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }")
+        dangerous_layout = QVBoxLayout(dangerous_group)
+        
         self.cb_overwrite = QCheckBox("Bestehende Videos im Zielordner überschreiben (Skip-Schutz deaktivieren)")
-        self.cb_overwrite.setStyleSheet("color: #c0392b; font-weight: 500; margin-top: 5px;")
-        folder_layout.addWidget(self.cb_overwrite)
+        self.cb_overwrite.setStyleSheet("color: #c0392b; font-weight: 500;")
+        dangerous_layout.addWidget(self.cb_overwrite)
         
-        main_layout.addWidget(folder_group)
+        config_layout.addWidget(dangerous_group)
         
-        # 2. Sektion: Video-Optionen
+        # 3. Sektion: Video-Optionen
         settings_group = QGroupBox("Video- & Komprimierungs-Optionen")
         settings_grid = QVBoxLayout(settings_group)
         
@@ -642,9 +670,12 @@ class ArchiverGUI(QMainWindow):
         self.hw_options_widget.hide()
         settings_grid.addWidget(self.hw_options_widget)
         
-        main_layout.addWidget(settings_group)
+        config_layout.addWidget(settings_group)
         
-        # 3. Sektion: Funktionstasten
+        # Add config container to main layout
+        main_layout.addWidget(self.config_container)
+        
+        # 4. Sektion: Funktionstasten
         btn_layout = QHBoxLayout()
         self.btn_scan = QPushButton("🔍 Ordner scannen")
         self.btn_scan.setStyleSheet("font-weight: bold; padding: 6px;")
@@ -681,6 +712,14 @@ class ArchiverGUI(QMainWindow):
         self.list_status.setStyleSheet("QListWidget::item { border-bottom: 1px solid #e0e0e0; }")
         self.list_status.itemClicked.connect(self.toggle_item_log)
         main_layout.addWidget(self.list_status, stretch=2)
+        
+    def toggle_configurations(self, checked):
+        if checked:
+            self.config_container.hide()
+            self.btn_toggle_config.setText("⚙️ Konfigurationen einblenden")
+        else:
+            self.config_container.show()
+            self.btn_toggle_config.setText("⚙️ Konfigurationen ausblenden")
     
     def on_renderer_changed(self, index):
         if index == 0:
@@ -859,6 +898,12 @@ class ArchiverGUI(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # Global App Icon for dock/taskbar
+    icon_path = os.path.join(os.path.dirname(__file__), "imgs", "logo.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        
     gui = ArchiverGUI()
     gui.show()
     sys.exit(app.exec_())
