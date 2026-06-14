@@ -61,11 +61,12 @@ python fix_videos_apple_fotos.py
 ```
 
 ## 💡 Geplante / Mögliche Features
-- [ ] Automatischer Dependency-Check beim Start (Prüft auf ffmpeg/exiftool)
-- [ ] Drag & Drop von Ordnern in die GUI
+- [x] Automatischer Dependency-Check beim Start (Prüft auf ffmpeg/exiftool)
+- [x] Drag & Drop von Ordnern in die GUI
+- [x] Option, die Ordnerstruktur beim Export flach zu klopfen (Flatten)
+- [x] Export-Funktion für Komprimierungs-Logs (CSV/TXT)
 - [ ] Hardware-Beschleunigung für Windows/Linux (NVENC, QSV)
-- [ ] Option, die Ordnerstruktur beim Export flach zu klopfen (Flatten)
-- [ ] Export-Funktion für Komprimierungs-Logs (CSV/TXT)
 
-## 📄 Lizenz
-Dieses Projekt ist für den privaten und professionellen Gebrauch freigegeben.
+
+## License
+This project is licensed under [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/?ref=chooser-v1) [![License: CC BY-NC-SA 4.0](https://licensebuttons.net/l/by-nc-sa/4.0/80x15.png)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
