@@ -742,7 +742,12 @@ class ArchiverGUI(QMainWindow):
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle("Ratgeber: Mac Hardware-Qualität")
         msg.setText(
-            "<b>Regler für Apple-Hardware-Beschleunigung:</b><br><br>• <b>50 - 65:</b> Hervorragender Sweet-Spot für Videotoolbox (Standard: 55).")
+            "<b>Regler für Apple-Hardware-Beschleunigung (hevc_videotoolbox):</b><br><br>"
+            "• <b>45 - 55:</b> Gute Balance aus Größe und Qualität (Standard: 55).<br>"
+            "• <b>60 - 75:</b> Sehr hohe Qualität, fast visuell verlustfrei.<br>"
+            "• <b>80 - 100:</b> Visuell verlustfrei (Dateigröße kann sehr groß werden).<br><br>"
+            "<i>Tipp: Bei der Hardware-Beschleunigung können Dateien etwas größer ausfallen als beim Software-Encoder bei vergleichbarer Qualität.</i>"
+        )
         msg.exec_()
     
     def browse_src(self):
@@ -893,7 +898,6 @@ class ArchiverGUI(QMainWindow):
         self.btn_stop.setEnabled(False)
         self.spin_jobs.setEnabled(True)
         self.btn_start.setEnabled(False)
-        self.worker = None
 
 
 if __name__ == "__main__":
