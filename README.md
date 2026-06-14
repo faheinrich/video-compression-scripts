@@ -1,5 +1,9 @@
 # Video Compression & Archiver Scripts
 
+<p align="center">
+  <img src="imgs/logo.png" alt="Video Archiver Logo" width="300">
+</p>
+
 Dieses Projekt bietet leistungsstarke Python-Skripte und eine benutzerfreundliche grafische Oberfläche (GUI) zur massenhaften Komprimierung und Archivierung von Videos. Es nutzt **FFmpeg** für hochwertige Video- und Audio-Konvertierung und **ExifTool**, um Metadaten (wie GPS, Aufnahmedatum und User-Tags) verlustfrei vom Original in die komprimierte Datei zu übertragen.
 
 ## 🚀 Features
