@@ -6,15 +6,16 @@ import signal
 import sys
 import re
 from pathlib import Path
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, QRunnable, QObject
+from PyQt5.QtGui import QPixmap
 
-from video_archiver.utils import get_video_info, parse_ffmpeg_time, format_size
+from video_archiver.utils import get_video_info, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
 
-class ScanWorker(QThread):
+class UnifiedScanWorker(QThread):
     file_found = pyqtSignal(dict)
     scan_finished = pyqtSignal(list)
     
-    def __init__(self, src_dir, dst_dir, flatten=False, sort_by="size"):
+    def __init__(self, src_dir, dst_dir, flatten=False, sort_by="name_asc"):
         super().__init__()
         self.src_dir = Path(src_dir)
         self.dst_dir = Path(dst_dir)
@@ -25,34 +26,84 @@ class ScanWorker(QThread):
     def run(self):
         local_list = []
         try:
-            all_files = [p for p in self.src_dir.rglob("*") if
-                         p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
+            # 1. Gather all files
+            orig_files = [p for p in self.src_dir.rglob("*") if
+                          p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
             
-            if self.sort_by == "size":
-                all_files.sort(key=lambda x: x.stat().st_size, reverse=True)
-            elif self.sort_by == "duration":
-                durations = {}
-                for f in all_files:
-                    dur, _, _ = get_video_info(f)
-                    durations[f] = dur or 0.0
-                all_files.sort(key=lambda x: durations[x], reverse=True)
-            else:
-                all_files.sort(key=lambda x: x.name.lower())
+            comp_files = []
+            if self.dst_dir.exists() and self.dst_dir.is_dir():
+                comp_files = [p for p in self.dst_dir.rglob("*") if
+                             p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
             
-            for p in all_files:
-                size = p.stat().st_size
-                rel_path = p.relative_to(self.src_dir)
-                if self.flatten:
-                    predicted_dst = self.dst_dir / f"{rel_path.stem}_archived.mp4"
-                else:
-                    predicted_dst = self.dst_dir / rel_path.with_name(f"{rel_path.stem}_archived.mp4")
+            # Map by stem
+            orig_dict = {f.stem: f for f in orig_files}
+            
+            comp_dict = {}
+            for f in comp_files:
+                stem = f.stem
+                if stem.lower().endswith("_archived"):
+                    stem = stem[:-9]
+                if stem.lower().endswith("_source"):
+                    stem = stem[:-7]
+                comp_dict[stem] = f
+
+            all_stems = set(orig_dict.keys())
+            
+            # 2. Build list
+            results = []
+            for stem in all_stems:
+                src_path = orig_dict[stem]
+                comp_path = comp_dict.get(stem)
                 
-                file_info = {'path': p, 'dst_path': predicted_dst, 'size': size, 'duration': None}
-                local_list.append(file_info)
-                self.file_found.emit(file_info)
-        except Exception:
-            pass
-        self.scan_finished.emit(local_list)
+                rel_path = src_path.relative_to(self.src_dir)
+                if self.flatten:
+                    predicted_dst = self.dst_dir / f"{src_path.stem}_archived.mp4"
+                else:
+                    predicted_dst = self.dst_dir / rel_path.with_name(f"{src_path.stem}_archived.mp4")
+                
+                # Use found comp_path if it exists, otherwise predicted_dst
+                actual_dst = comp_path if comp_path else predicted_dst
+                
+                item = {
+                    'stem': stem,
+                    'path': src_path,
+                    'dst_path': actual_dst,
+                    'exists_compressed': comp_path is not None,
+                    'size': src_path.stat().st_size,
+                    'comp_size': comp_path.stat().st_size if comp_path else 0,
+                    'duration': None # Will be filled if needed
+                }
+                results.append(item)
+            
+            # 3. Sort
+            if self.sort_by == "size_desc":
+                results.sort(key=lambda x: x['size'], reverse=True)
+            elif self.sort_by == "size_asc":
+                results.sort(key=lambda x: x['size'])
+            elif self.sort_by == "duration_desc":
+                durations = {}
+                for f in results:
+                    dur, _, _ = get_video_info(f['path'])
+                    durations[f['path']] = dur or 0.0
+                results.sort(key=lambda x: durations[x['path']], reverse=True)
+            elif self.sort_by == "duration_asc":
+                durations = {}
+                for f in results:
+                    dur, _, _ = get_video_info(f['path'])
+                    durations[f['path']] = dur or 0.0
+                results.sort(key=lambda x: durations[x['path']])
+            elif self.sort_by == "name_desc":
+                results.sort(key=lambda x: x['stem'].lower(), reverse=True)
+            else: # name_asc
+                results.sort(key=lambda x: x['stem'].lower())
+            
+            for item in results:
+                self.file_found.emit(item)
+                
+        except Exception as e:
+            print(f"Scan error: {e}")
+        
+        self.scan_finished.emit(results)
 
 
 class ArchiveWorker(QThread):
@@ -380,3 +431,23 @@ class CompareScanWorker(QThread):
             print(f"Compare scan error: {e}")
             
         self.scan_finished.emit(pairs)
+
+class ThumbnailSignals(QObject):
+    finished = pyqtSignal(QPixmap)
+
+class ThumbnailRunnable(QRunnable):
+    def __init__(self, video_path):
+        super().__init__()
+        self.video_path = video_path
+        self.signals = ThumbnailSignals()
+
+    def run(self):
+        thumb_path = get_thumbnail_path(self.video_path)
+        if not thumb_path.exists():
+            generate_thumbnail(self.video_path, thumb_path)
+        
+        if thumb_path.exists():
+            pixmap = QPixmap(str(thumb_path))
+            self.signals.finished.emit(pixmap)
+        else:
+            self.signals.finished.emit(None)

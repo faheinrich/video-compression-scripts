@@ -1,6 +1,7 @@
 import os
 import subprocess
 import re
+import hashlib
 from pathlib import Path
 
 def format_size(size_bytes):
@@ -18,6 +19,26 @@ def format_size(size_bytes):
     
     prefix = "-" if is_negative else ""
     return f"{prefix}{size_bytes:.2f} {unit_found}"
+
+def get_thumbnail_path(video_path):
+    thumb_dir = Path("thumbnails")
+    thumb_dir.mkdir(exist_ok=True)
+    video_hash = hashlib.md5(str(video_path).encode()).hexdigest()
+    return thumb_dir / f"{video_hash}.jpg"
+
+def generate_thumbnail(video_path, output_path):
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_path),
+        "-ss", "00:00:01",
+        "-vframes", "1",
+        "-vf", "scale=100:-1",
+        str(output_path)
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, check=True)
+        return True
+    except Exception:
+        return False
 
 def format_duration(seconds):
     if not seconds or seconds == "wird geladen...": return "⏱️ --:--"

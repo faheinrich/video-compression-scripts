@@ -5,14 +5,14 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFileDialog, QListWidget, QListWidgetItem,
     QProgressBar, QSpinBox, QGroupBox, QCheckBox, QComboBox, QSlider,
-    QMessageBox, QTabWidget
+    QMessageBox
 )
 from PyQt5.QtCore import pyqtSlot, Qt
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QPixmap
 
 from video_archiver.utils import check_dependencies, format_size
 from video_archiver.widgets import DropLineEdit, VideoItemWidget, CompareItemWidget, CompareVideoDialog
-from video_archiver.workers import ScanWorker, ArchiveWorker, CompareScanWorker
+from video_archiver.workers import UnifiedScanWorker, ArchiveWorker
 
 class ArchiverGUI(QMainWindow):
     def __init__(self):
@@ -25,9 +25,9 @@ class ArchiverGUI(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
             
         self.resize(1050, 800)
+        self.logo_path = icon_path
         self.worker = None
         self.scan_worker = None
-        self.compare_worker = None
         
         self.widget_mapping = {}
         self.video_data_list = []
@@ -53,32 +53,14 @@ class ArchiverGUI(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
-        self.tabs = QTabWidget()
-        main_layout.addWidget(self.tabs)
+        self.init_shared_folder_selection(main_layout)
         
-        self.tab_archive = QWidget()
-        self.tab_compare = QWidget()
+        # Main content container (formerly tabs)
+        self.main_content = QWidget()
+        main_layout.addWidget(self.main_content)
         
-        self.tabs.addTab(self.tab_archive, "Archivierung")
-        self.tabs.addTab(self.tab_compare, "Vergleich & Verwaltung")
         
-        lang_layout = QHBoxLayout()
-        lang_layout.addStretch()
-        lang_layout.addWidget(QLabel("Language / Sprache:"))
-        self.combo_lang = QComboBox()
-        self.combo_lang.addItems(["Deutsch", "English", "Français", "Español"])
-        self.combo_lang.currentIndexChanged.connect(self.change_language)
-        lang_layout.addWidget(self.combo_lang)
-        main_layout.addLayout(lang_layout)
-        
-        self.init_archive_tab()
-        self.init_compare_tab()
-        
-        # Synchronize paths between tabs
-        self.txt_src.textChanged.connect(self.txt_comp_orig.setText)
-        self.txt_dst.textChanged.connect(self.txt_comp_comp.setText)
-        self.txt_comp_orig.setText(self.txt_src.text())
-        self.txt_comp_comp.setText(self.txt_dst.text())
+        self.init_main_content()
         
         self.set_original_texts()
         
@@ -98,9 +80,6 @@ class ArchiverGUI(QMainWindow):
                         widget.setProperty("orig_title", title)
                 except:
                     pass
-                    
-        for i in range(self.tabs.count()):
-            self.tabs.setProperty(f"orig_tab_{i}", self.tabs.tabText(i))
 
     def change_language(self, index):
         langs = ["de", "en", "fr", "es"]
@@ -123,75 +102,61 @@ class ArchiverGUI(QMainWindow):
                 orig_title = widget.property("orig_title")
                 if orig_title:
                     widget.setTitle(tr(orig_title))
-                    
-        for i in range(self.tabs.count()):
-            orig_tab = self.tabs.property(f"orig_tab_{i}")
-            if orig_tab:
-                self.tabs.setTabText(i, tr(orig_tab))
 
-    def init_archive_tab(self):
-        layout = QVBoxLayout(self.tab_archive)
+    def init_main_content(self):
+        layout = QVBoxLayout(self.main_content)
         
-        header_layout = QHBoxLayout()
-        header_layout.addStretch()
+        layout_top = QHBoxLayout()
+        layout_top.addWidget(QLabel("Sortieren nach:"))
+        self.combo_comp_sort = QComboBox()
+        self.combo_comp_sort.addItems([
+            "Dateiname (A-Z)",
+            "Dateiname (Z-A)",
+            "Dateigröße (Größte zuerst)",
+            "Dateigröße (Kleinste zuerst)",
+            "Videolänge (Längste zuerst)",
+            "Videolänge (Kürzeste zuerst)"
+        ])
+        layout_top.addWidget(self.combo_comp_sort)
+        
+        layout_top.addStretch()
+        
+        layout_top.addWidget(QLabel("Sprache:"))
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItems(["Deutsch", "English", "Français", "Español"])
+        self.combo_lang.currentIndexChanged.connect(self.change_language)
+        layout_top.addWidget(self.combo_lang)
+        
         self.btn_toggle_config = QPushButton("⚙️ Konfigurationen ausblenden")
         self.btn_toggle_config.setCheckable(True)
         self.btn_toggle_config.clicked.connect(self.toggle_configurations)
-        header_layout.addWidget(self.btn_toggle_config)
-        layout.addLayout(header_layout)
+        layout_top.addWidget(self.btn_toggle_config)
+        
+        self.btn_toggle_danger = QPushButton("⚠️ Gefahrenzone ausblenden")
+        self.btn_toggle_danger.setCheckable(True)
+        self.btn_toggle_danger.setChecked(False)
+        self.btn_toggle_danger.clicked.connect(self.toggle_dangerzone)
+        layout_top.addWidget(self.btn_toggle_danger)
+        layout.addLayout(layout_top)
         
         self.config_container = QWidget()
         config_layout = QVBoxLayout(self.config_container)
         config_layout.setContentsMargins(0, 0, 0, 0)
         
-        folder_group = QGroupBox("Verzeichnis-Einstellungen (Drag & Drop unterstützt)")
-        folder_layout = QVBoxLayout(folder_group)
-        for label, default, slot in [
-            ("Quellordner:", "/Users/fabian/Library/Mobile Documents/com~apple~CloudDocs", self.browse_src),
-            ("Zielordner:", "../Video Compression/cloud_compressed_limited_slow_crf20", self.browse_dst)
-        ]:
-            lay = QHBoxLayout()
-            lbl = QLabel(label)
-            lbl.setFixedWidth(90)
-            txt = DropLineEdit(default)
-            btn = QPushButton("Durchsuchen...")
-            btn.clicked.connect(slot)
-            lay.addWidget(lbl)
-            lay.addWidget(txt)
-            lay.addWidget(btn)
-            folder_layout.addLayout(lay)
-            if label.startswith("Quell"):
-                self.txt_src = txt
-            else:
-                self.txt_dst = txt
-                
+        self.dangerous_group = QGroupBox("⚠️ Gefahrenzone")
+        self.dangerous_group.setStyleSheet("QGroupBox { color: #c0392b; font-weight: bold; border: 1px solid #e74c3c; border-radius: 4px; margin-top: 10px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }")
+        dangerous_layout = QVBoxLayout(self.dangerous_group)
         self.cb_flatten = QCheckBox("Ordnerstruktur verwerfen (Flatten - alle Videos direkt in den Zielordner)")
-        folder_layout.addWidget(self.cb_flatten)
-        
-        sort_lay = QHBoxLayout()
-        sort_lay.addWidget(QLabel("Sortieren nach:"))
-        self.combo_sort = QComboBox()
-        self.combo_sort.addItems([
-            "Dateigröße (Größte zuerst)",
-            "Videolänge (Längste zuerst)",
-            "Dateiname (A-Z)"
-        ])
-        sort_lay.addWidget(self.combo_sort)
-        sort_lay.addStretch()
-        folder_layout.addLayout(sort_lay)
-        
-        config_layout.addWidget(folder_group)
-        
-        dangerous_group = QGroupBox("⚠️ Gefahrenzone")
-        dangerous_group.setStyleSheet("QGroupBox { color: #c0392b; font-weight: bold; border: 1px solid #e74c3c; border-radius: 4px; margin-top: 10px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }")
-        dangerous_layout = QVBoxLayout(dangerous_group)
+        self.cb_flatten.setStyleSheet("color: #c0392b; font-weight: 500;")
+        dangerous_layout.addWidget(self.cb_flatten)
         self.cb_overwrite = QCheckBox("Bestehende Videos im Zielordner überschreiben (Skip-Schutz deaktivieren)")
         self.cb_overwrite.setStyleSheet("color: #c0392b; font-weight: 500;")
         dangerous_layout.addWidget(self.cb_overwrite)
         self.cb_dry_run = QCheckBox("Dry-Run (nur die erste Sekunde zum Testen komprimieren)")
         self.cb_dry_run.setStyleSheet("color: #2980b9; font-weight: bold;")
         dangerous_layout.addWidget(self.cb_dry_run)
-        config_layout.addWidget(dangerous_group)
+        config_layout.addWidget(self.dangerous_group)
+        self.dangerous_group.show()
         
         settings_group = QGroupBox("Video- & Komprimierungs-Optionen")
         settings_grid = QVBoxLayout(settings_group)
@@ -286,7 +251,7 @@ class ArchiverGUI(QMainWindow):
         btn_layout = QHBoxLayout()
         self.btn_scan = QPushButton("🔍 Ordner scannen")
         self.btn_scan.setStyleSheet("font-weight: bold; padding: 6px;")
-        self.btn_scan.clicked.connect(self.start_async_scan)
+        self.btn_scan.clicked.connect(self.start_unified_scan)
         
         self.btn_start = QPushButton("🚀 Archivierung Starten")
         self.btn_start.setStyleSheet("background-color: #2ecc71; color: white; font-weight: bold; padding: 6px;")
@@ -324,55 +289,6 @@ class ArchiverGUI(QMainWindow):
         self.list_status.itemClicked.connect(self.toggle_item_log)
         layout.addWidget(self.list_status, stretch=2)
 
-    def init_compare_tab(self):
-        layout = QVBoxLayout(self.tab_compare)
-        
-        folder_group = QGroupBox("Vergleichs-Ordner auswählen")
-        folder_layout = QVBoxLayout(folder_group)
-        
-        lay_orig = QHBoxLayout()
-        lay_orig.addWidget(QLabel("Original-Ordner:"))
-        self.txt_comp_orig = DropLineEdit("")
-        btn_comp_orig = QPushButton("Durchsuchen...")
-        btn_comp_orig.clicked.connect(lambda: self.browse_folder(self.txt_comp_orig))
-        lay_orig.addWidget(self.txt_comp_orig)
-        lay_orig.addWidget(btn_comp_orig)
-        folder_layout.addLayout(lay_orig)
-        
-        lay_comp = QHBoxLayout()
-        lay_comp.addWidget(QLabel("Komprimiert-Ordner:"))
-        self.txt_comp_comp = DropLineEdit("")
-        btn_comp_comp = QPushButton("Durchsuchen...")
-        btn_comp_comp.clicked.connect(lambda: self.browse_folder(self.txt_comp_comp))
-        lay_comp.addWidget(self.txt_comp_comp)
-        lay_comp.addWidget(btn_comp_comp)
-        folder_layout.addLayout(lay_comp)
-        
-        comp_sort_lay = QHBoxLayout()
-        comp_sort_lay.addWidget(QLabel("Sortieren nach:"))
-        self.combo_comp_sort = QComboBox()
-        self.combo_comp_sort.addItems([
-            "Dateiname (A-Z)",
-            "Dateiname (Z-A)",
-            "Dateigröße (Größte zuerst)",
-            "Dateigröße (Kleinste zuerst)",
-            "Videolänge (Längste zuerst)",
-            "Videolänge (Kürzeste zuerst)"
-        ])
-        comp_sort_lay.addWidget(self.combo_comp_sort)
-        comp_sort_lay.addStretch()
-        folder_layout.addLayout(comp_sort_lay)
-        
-        self.btn_compare_scan = QPushButton("🔍 Ordner vergleichen")
-        self.btn_compare_scan.setStyleSheet("font-weight: bold; padding: 6px; background-color: #3498db; color: white;")
-        self.btn_compare_scan.clicked.connect(self.start_compare_scan)
-        folder_layout.addWidget(self.btn_compare_scan)
-        
-        layout.addWidget(folder_group)
-        
-        self.list_compare = QListWidget()
-        self.list_compare.setStyleSheet("QListWidget::item { border-bottom: 1px solid #e0e0e0; padding: 4px; }")
-        layout.addWidget(self.list_compare, stretch=1)
 
     def toggle_configurations(self, checked):
         if checked:
@@ -381,6 +297,14 @@ class ArchiverGUI(QMainWindow):
         else:
             self.config_container.show()
             self.btn_toggle_config.setText("⚙️ Konfigurationen ausblenden")
+            
+    def toggle_dangerzone(self, checked):
+        if checked:
+            self.dangerous_group.hide()
+            self.btn_toggle_danger.setText("⚠️ Gefahrenzone einblenden")
+        else:
+            self.dangerous_group.show()
+            self.btn_toggle_danger.setText("⚠️ Gefahrenzone ausblenden")
     
     def on_renderer_changed(self, index):
         if index == 0:
@@ -414,7 +338,13 @@ class ArchiverGUI(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Ordner auswählen", line_edit.text())
         if folder: line_edit.setText(folder)
     
-    def start_async_scan(self):
+    def update_path(self, target, text):
+        if target.text() != text:
+            target.blockSignals(True)
+            target.setText(text)
+            target.blockSignals(False)
+    
+    def start_unified_scan(self):
         self.btn_scan.setEnabled(False)
         self.btn_start.setEnabled(False)
         self.list_status.clear()
@@ -426,47 +356,58 @@ class ArchiverGUI(QMainWindow):
         self.lbl_global_savings.setText("Gesamt-Ersparnis: 0 B -> 0 B (0.0%) | 💰 Gesparter Speicherplatz: 0 B")
         self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #2c3e50;")
         
-        sort_text = self.combo_sort.currentText()
-        if "Dateigröße" in sort_text:
-            sort_by = "size"
-        elif "Videolänge" in sort_text:
-            sort_by = "duration"
+        sort_text = self.combo_comp_sort.currentText()
+        if "Dateigröße (Größte" in sort_text:
+            sort_by = "size_desc"
+        elif "Dateigröße (Kleinste" in sort_text:
+            sort_by = "size_asc"
+        elif "Videolänge (Längste" in sort_text:
+            sort_by = "duration_desc"
+        elif "Videolänge (Kürzeste" in sort_text:
+            sort_by = "duration_asc"
+        elif "Dateiname (Z-A)" in sort_text:
+            sort_by = "name_desc"
         else:
-            sort_by = "name"
+            sort_by = "name_asc"
             
-        self.scan_worker = ScanWorker(self.txt_src.text(), self.txt_dst.text(), self.cb_flatten.isChecked(), sort_by)
-        self.scan_worker.file_found.connect(self.on_scan_file_found)
-        self.scan_worker.scan_finished.connect(self.on_scan_finished)
+        self.scan_worker = UnifiedScanWorker(self.txt_src.text(), self.txt_dst.text(), self.cb_flatten.isChecked(), sort_by)
+        self.scan_worker.file_found.connect(self.on_unified_file_found)
+        self.scan_worker.scan_finished.connect(self.on_unified_scan_finished)
         self.scan_worker.start()
     
     @pyqtSlot(dict)
-    def on_scan_file_found(self, file_info):
+    def on_unified_file_found(self, file_info):
         filepath = str(file_info['path'])
-        filename = file_info['path'].name
-        
-        # Check if another file with the same name already exists in widget_mapping
-        is_duplicate = False
-        for existing_path in self.widget_mapping.keys():
-            if Path(existing_path).name == filename and existing_path != filepath:
-                is_duplicate = True
-                break
-                
-        display_name = filename
-        if is_duplicate:
-            display_name = f"⚠️ {filename}"
-            
         index = self.list_status.count() + 1
         item = QListWidgetItem(self.list_status)
-        custom_widget = VideoItemWidget(display_name, file_info['size'], file_info['path'], file_info['dst_path'], index=index)
         
-        item.setSizeHint(custom_widget.sizeHint())
-        self.list_status.addItem(item)
-        self.list_status.setItemWidget(item, custom_widget)
-        self.widget_mapping[filepath] = custom_widget
+        if file_info.get('exists_compressed'):
+            widget = CompareItemWidget(file_info['path'], file_info['dst_path'], file_info['size'], file_info['comp_size'], index=index)
+            widget.set_action_handler(self.handle_compare_action)
+            item.setSizeHint(widget.sizeHint())
+            self.list_status.addItem(item)
+            self.list_status.setItemWidget(item, widget)
+            self.widget_mapping[filepath] = widget
+        else:
+            custom_widget = VideoItemWidget(file_info['path'].name, file_info['size'], file_info['path'], file_info['dst_path'], index=index)
+            item.setSizeHint(custom_widget.sizeHint())
+            self.list_status.addItem(item)
+            self.list_status.setItemWidget(item, custom_widget)
+            self.widget_mapping[filepath] = custom_widget
+            self.video_data_list.append(file_info)
+            self.total_src_bytes += file_info['size']
+            self.update_savings_label()
     
     @pyqtSlot(list)
-    def on_scan_finished(self, full_list):
-        self.video_data_list = full_list
+    def on_unified_scan_finished(self, full_list):
+        self.btn_scan.setEnabled(True)
+        self.btn_start.setEnabled(len(self.video_data_list) > 0)
+        self.btn_stop.setEnabled(False)
+        self.btn_export.setEnabled(True)
+        
+        if not full_list:
+            QMessageBox.information(self, "Scan beendet", "Keine Videodateien gefunden.")
+        
         total = len(full_list)
         self.lbl_global_progress.setText(f"Gesamtfortschritt: 0 / {total}")
         self.progress_bar.setMaximum(total)
@@ -515,7 +456,7 @@ class ArchiverGUI(QMainWindow):
     
     def toggle_item_log(self, item):
         widget = self.list_status.itemWidget(item)
-        if widget:
+        if widget and hasattr(widget, 'toggle_log'):
             is_visible = widget.toggle_log()
             item.setSizeHint(widget.sizeHint() if is_visible else widget.minimumSizeHint())
             self.list_status.doItemsLayout()
@@ -529,31 +470,48 @@ class ArchiverGUI(QMainWindow):
     def on_file_duration_discovered(self, filepath, duration):
         if filepath in self.widget_mapping: self.widget_mapping[filepath].update_duration(duration)
     
+    def update_savings_label(self):
+        global_diff = self.total_src_bytes - self.total_dst_bytes
+        global_ratio = (self.total_dst_bytes / self.total_src_bytes) * 100 if self.total_src_bytes > 0 else 100.0
+        
+        src_formatted = format_size(self.total_src_bytes)
+        dst_formatted = format_size(self.total_dst_bytes)
+        diff_formatted = format_size(global_diff)
+        
+        self.lbl_global_savings.setText(
+            f"Gesamt-Ersparnis: {src_formatted} ➜ {dst_formatted} ({global_ratio:.1f}%) | "
+            f"💰 Gesparter Speicherplatz: {diff_formatted}"
+        )
+        
+        if global_diff >= 0:
+            self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #27ae60; margin-top: 2px; margin-bottom: 5px;")
+        else:
+            self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #c0392b; margin-top: 2px; margin-bottom: 5px;")
+
     @pyqtSlot(str, str, str, dict)
     def on_status_update(self, filepath, status, reason, data_dict):
         if filepath in self.widget_mapping:
-            self.widget_mapping[filepath].set_status_style(status, reason, data_dict)
+            widget = self.widget_mapping[filepath]
+            widget.set_status_style(status, reason, data_dict)
             
             if (status == "finished" or status == "skipped") and data_dict:
                 self.total_src_bytes += data_dict.get('src_size', 0)
                 self.total_dst_bytes += data_dict.get('dst_size', 0)
+                self.update_savings_label()
                 
-                global_diff = self.total_src_bytes - self.total_dst_bytes
-                global_ratio = (self.total_dst_bytes / self.total_src_bytes) * 100 if self.total_src_bytes > 0 else 100.0
-                
-                src_formatted = format_size(self.total_src_bytes)
-                dst_formatted = format_size(self.total_dst_bytes)
-                diff_formatted = format_size(global_diff)
-                
-                self.lbl_global_savings.setText(
-                    f"Gesamt-Ersparnis: {src_formatted} ➜ {dst_formatted} ({global_ratio:.1f}%) | "
-                    f"💰 Gesparter Speicherplatz: {diff_formatted}"
-                )
-                
-                if global_diff >= 0:
-                    self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #27ae60; margin-top: 2px; margin-bottom: 5px;")
-                else:
-                    self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #c0392b; margin-top: 2px; margin-bottom: 5px;")
+                if isinstance(widget, VideoItemWidget) and (status == "finished" or status == "skipped"):
+                    for i in range(self.list_status.count()):
+                        item = self.list_status.item(i)
+                        if self.list_status.itemWidget(item) == widget:
+                            new_widget = CompareItemWidget(widget.src_path, widget.dst_path, 
+                                                         data_dict.get('src_size', 0), 
+                                                         data_dict.get('dst_size', 0), 
+                                                         index=i+1)
+                            new_widget.set_action_handler(self.handle_compare_action)
+                            item.setSizeHint(new_widget.sizeHint())
+                            self.list_status.setItemWidget(item, new_widget)
+                            self.widget_mapping[filepath] = new_widget
+                            break
     
     @pyqtSlot(str, int)
     def on_file_progress(self, path, percentage):
@@ -590,53 +548,6 @@ class ArchiverGUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Fehler", f"Fehler beim Exportieren: {e}")
 
-    # --- Compare Tab Logic ---
-    
-    def start_compare_scan(self):
-        orig_dir = self.txt_comp_orig.text()
-        comp_dir = self.txt_comp_comp.text()
-        if not orig_dir or not comp_dir:
-            QMessageBox.warning(self, "Fehler", "Bitte wähle beide Ordner aus.")
-            return
-            
-        self.btn_compare_scan.setEnabled(False)
-        self.list_compare.clear()
-        
-        sort_text = self.combo_comp_sort.currentText()
-        if "Dateigröße (Größte" in sort_text:
-            sort_by = "size_desc"
-        elif "Dateigröße (Kleinste" in sort_text:
-            sort_by = "size_asc"
-        elif "Videolänge (Längste" in sort_text:
-            sort_by = "duration_desc"
-        elif "Videolänge (Kürzeste" in sort_text:
-            sort_by = "duration_asc"
-        elif "Dateiname (Z-A)" in sort_text:
-            sort_by = "name_desc"
-        else:
-            sort_by = "name_asc"
-            
-        self.compare_worker = CompareScanWorker(orig_dir, comp_dir, sort_by)
-        self.compare_worker.pair_found.connect(self.on_compare_pair_found)
-        self.compare_worker.scan_finished.connect(self.on_compare_scan_finished)
-        self.compare_worker.start()
-
-    @pyqtSlot(dict)
-    def on_compare_pair_found(self, pair):
-        index = self.list_compare.count() + 1
-        item = QListWidgetItem(self.list_compare)
-        widget = CompareItemWidget(pair['orig_path'], pair['comp_path'], pair['orig_size'], pair['comp_size'], index=index)
-        widget.set_action_handler(self.handle_compare_action)
-        
-        item.setSizeHint(widget.sizeHint())
-        self.list_compare.addItem(item)
-        self.list_compare.setItemWidget(item, widget)
-
-    @pyqtSlot(list)
-    def on_compare_scan_finished(self, pairs):
-        self.btn_compare_scan.setEnabled(True)
-        if not pairs:
-            QMessageBox.information(self, "Scan beendet", "Keine Videodateien gefunden.")
 
     def handle_compare_action(self, action, widget):
         orig_path = widget.orig_path
@@ -693,3 +604,49 @@ class ArchiverGUI(QMainWindow):
                     widget.lbl_name.setText(widget.lbl_name.text() + " [Komp. gelöscht]")
                 except Exception as e:
                     QMessageBox.critical(self, "Fehler", f"Fehler beim Löschen: {e}")
+
+    def init_shared_folder_selection(self, parent_layout):
+        folder_group = QGroupBox("Verzeichnis-Einstellungen (Drag & Drop unterstützt)")
+        folder_layout = QHBoxLayout(folder_group)
+        
+        # Source layout
+        src_lay = QVBoxLayout()
+        src_lay.addWidget(QLabel("Quellordner:"))
+        self.txt_src = DropLineEdit("/Users/fabian/Library/Mobile Documents/com~apple~CloudDocs")
+        btn_src = QPushButton("Durchsuchen...")
+        btn_src.clicked.connect(self.browse_src)
+        src_lay.addWidget(self.txt_src)
+        src_lay.addWidget(btn_src)
+        
+        # Arrow container
+        arrow_lay = QVBoxLayout()
+        arrow = QLabel("➜")
+        font = arrow.font()
+        font.setPointSize(24)
+        arrow.setFont(font)
+        arrow.setAlignment(Qt.AlignCenter)
+        arrow_lay.addWidget(arrow)
+
+        # Logo
+        if hasattr(self, 'logo_path') and os.path.exists(self.logo_path):
+            logo_label = QLabel()
+            pixmap = QPixmap(self.logo_path)
+            pixmap = pixmap.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_label.setPixmap(pixmap)
+            logo_label.setAlignment(Qt.AlignCenter)
+            arrow_lay.addWidget(logo_label)
+        
+        # Destination layout
+        dst_lay = QVBoxLayout()
+        dst_lay.addWidget(QLabel("Zielordner:"))
+        self.txt_dst = DropLineEdit("../Video Compression/cloud_compressed_limited_slow_crf20")
+        btn_dst = QPushButton("Durchsuchen...")
+        btn_dst.clicked.connect(self.browse_dst)
+        dst_lay.addWidget(self.txt_dst)
+        dst_lay.addWidget(btn_dst)
+        
+        folder_layout.addLayout(src_lay)
+        folder_layout.addLayout(arrow_lay)
+        folder_layout.addLayout(dst_lay)
+        
+        parent_layout.addWidget(folder_group)

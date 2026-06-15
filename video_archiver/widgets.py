@@ -1,13 +1,19 @@
+import i18n
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, 
     QPushButton, QTextEdit, QLineEdit, QDialog, QSlider, QStyle,
-    QGraphicsView, QGraphicsScene
+    QGraphicsView, QGraphicsScene, QMessageBox
 )
-from PyQt5.QtCore import Qt, QUrl, QSizeF, pyqtSignal
+from PyQt5.QtCore import Qt, QUrl, QSizeF, pyqtSignal, QThread, QObject, QThreadPool
+from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtMultimediaWidgets import QVideoWidget, QGraphicsVideoItem
 
-from .utils import format_size, format_duration, open_in_finder, get_resolution_and_fps, get_video_rotation
+from .utils import (
+    format_size, format_duration, open_in_finder, get_resolution_and_fps, 
+    get_video_rotation, get_thumbnail_path, generate_thumbnail
+)
+from .workers import ThumbnailRunnable
 
 class DropLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -254,21 +260,32 @@ class CompareVideoDialog(QDialog):
         comp_meta = f"{w_c}x{h_c} @ {fps_c} FPS" if w_c and h_c else "Unbekannt"
         
         # Original Player
-        self.player_orig = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        self.player_orig = QMediaPlayer()
         self.view_orig = ZoomableVideoView(self.player_orig)
         self.view_orig.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        self.player_orig.error.connect(self.handle_player_error)
+        self.player_orig.mediaStatusChanged.connect(lambda s: print(f"DEBUG: Orig player status: {s}"))
         
         orig_lbl = QLabel(f"<b>Original (Mausrad für Zoom, Klicken für Verschieben)</b><br>{orig_meta}")
         orig_lbl.setAlignment(Qt.AlignCenter)
         orig_container = QVBoxLayout()
         orig_container.addWidget(orig_lbl)
         orig_container.addWidget(self.view_orig, stretch=1)
+        
+        self.btn_rotate_orig = QPushButton("🔄 Rotieren")
+        self.btn_rotate_orig.clicked.connect(lambda: self.rotate_video(self.view_orig))
+        orig_container.addWidget(self.btn_rotate_orig)
+        
         video_layout.addLayout(orig_container, stretch=1)
         
         # Compressed Player
-        self.player_comp = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        self.player_comp = QMediaPlayer()
         self.view_comp = ZoomableVideoView(self.player_comp)
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        self.player_comp.error.connect(self.handle_player_error)
+        self.player_comp.mediaStatusChanged.connect(lambda s: print(f"DEBUG: Comp player status: {s}"))
         
         # Apply rotation
         rot_orig = get_video_rotation(orig_path)
@@ -281,6 +298,11 @@ class CompareVideoDialog(QDialog):
         comp_container = QVBoxLayout()
         comp_container.addWidget(comp_lbl)
         comp_container.addWidget(self.view_comp, stretch=1)
+        
+        self.btn_rotate_comp = QPushButton("🔄 Rotieren")
+        self.btn_rotate_comp.clicked.connect(lambda: self.rotate_video(self.view_comp))
+        comp_container.addWidget(self.btn_rotate_comp)
+        
         video_layout.addLayout(comp_container, stretch=1)
         
         layout.addLayout(video_layout)
@@ -321,8 +343,10 @@ class CompareVideoDialog(QDialog):
         btn_layout.addWidget(self.btn_close)
         layout.addLayout(btn_layout)
         
-        self.player_orig.setMedia(QMediaContent(QUrl.fromLocalFile(str(orig_path))))
-        self.player_comp.setMedia(QMediaContent(QUrl.fromLocalFile(str(comp_path))))
+        print(f"DEBUG: Loading orig_path: {orig_path}")
+        print(f"DEBUG: Loading comp_path: {comp_path}")
+        self.player_orig.setMedia(QMediaContent(QUrl.fromLocalFile(str(orig_path.resolve()))))
+        self.player_comp.setMedia(QMediaContent(QUrl.fromLocalFile(str(comp_path.resolve()))))
         
         self.view_orig.horizontalScrollBar().valueChanged.connect(self.view_comp.horizontalScrollBar().setValue)
         self.view_comp.horizontalScrollBar().valueChanged.connect(self.view_orig.horizontalScrollBar().setValue)
@@ -334,6 +358,13 @@ class CompareVideoDialog(QDialog):
         self.player_orig.play()
         self.player_comp.play()
         
+    def rotate_video(self, view):
+        rot = view.video_item.rotation()
+        # Set transform origin to center
+        rect = view.video_item.boundingRect()
+        view.video_item.setTransformOriginPoint(rect.center())
+        view.video_item.setRotation(rot + 90)
+    
     def slider_zoom_changed(self, value):
         factor = value / 100.0
         self.view_orig.set_zoom(factor)
@@ -371,6 +402,13 @@ class CompareVideoDialog(QDialog):
             self.player_orig.play()
             self.player_comp.play()
             
+    def handle_player_error(self, error):
+        print(f"DEBUG: Player error occurred: {error}")
+        if error != QMediaPlayer.NoError:
+            msg = self.sender().errorString()
+            print(f"DEBUG: Error message: {msg}")
+            QMessageBox.critical(self, "Video Fehler", f"Konnte Video nicht laden: {msg}")
+            
     def closeEvent(self, event):
         self.player_orig.stop()
         self.player_comp.stop()
@@ -389,6 +427,11 @@ class CompareItemWidget(QWidget):
         # File info row
         info_layout = QHBoxLayout()
         info_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.lbl_thumbnail = QLabel()
+        self.lbl_thumbnail.setFixedSize(60, 40)
+        self.lbl_thumbnail.setStyleSheet("background-color: #ddd; border: 1px solid #ccc;")
+        info_layout.addWidget(self.lbl_thumbnail, stretch=0)
         
         self.filename = orig_path.name if orig_path else comp_path.name
         display_name = f"{index}. {self.filename}" if index is not None else self.filename
@@ -428,6 +471,9 @@ class CompareItemWidget(QWidget):
         info_layout.addWidget(self.btn_find_comp)
         
         self.main_layout.addLayout(info_layout)
+        
+        # Load thumbnail in background
+        self.load_thumbnail(orig_path or comp_path)
         
         # Actions row
         actions_layout = QHBoxLayout()
@@ -482,6 +528,16 @@ class CompareItemWidget(QWidget):
         actions_layout.addStretch()
         
         self.main_layout.addLayout(actions_layout)
+
+    def load_thumbnail(self, video_path):
+        worker = ThumbnailRunnable(video_path)
+        worker.signals.finished.connect(self.on_thumbnail_loaded)
+        QThreadPool.globalInstance().start(worker)
+
+    def on_thumbnail_loaded(self, pixmap):
+        if pixmap:
+            self.lbl_thumbnail.setPixmap(pixmap)
+            self.lbl_thumbnail.setStyleSheet("background-color: transparent; border: 1px solid #ccc;")
 
     def set_action_handler(self, handler):
         self.btn_play.clicked.connect(lambda: handler("play", self))
