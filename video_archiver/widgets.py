@@ -7,7 +7,7 @@ from PyQt5.QtCore import Qt, QUrl, QSizeF, pyqtSignal
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtMultimediaWidgets import QVideoWidget, QGraphicsVideoItem
 
-from .utils import format_size, format_duration, open_in_finder, get_resolution_and_fps
+from .utils import format_size, format_duration, open_in_finder, get_resolution_and_fps, get_video_rotation
 
 class DropLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -127,7 +127,7 @@ class VideoItemWidget(QWidget):
     
     def set_status_style(self, status, detail_text="", extra_data=None):
         status = status.lower()
-        if detail_text:
+        if detail_text and status != "running":
             self.lbl_details.setText(detail_text)
             self.lbl_details.show()
         else:
@@ -157,7 +157,10 @@ class VideoItemWidget(QWidget):
                 "background-color: #7f8c8d; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
             self.progress.hide()
         elif status == "running":
-            self.lbl_status.setText(_("⚡ Running"))
+            if detail_text:
+                self.lbl_status.setText(f"⚡ Läuft ({detail_text})")
+            else:
+                self.lbl_status.setText(_("⚡ Running"))
             self.lbl_status.setStyleSheet(
                 "background-color: #f1c40f; color: black; border-radius: 4px; padding: 3px; font-size: 11px; font-weight: bold;")
             self.progress.show()
@@ -267,6 +270,12 @@ class CompareVideoDialog(QDialog):
         self.view_comp = ZoomableVideoView(self.player_comp)
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
+        # Apply rotation
+        rot_orig = get_video_rotation(orig_path)
+        rot_comp = get_video_rotation(comp_path)
+        self.view_orig.video_item.setRotation(rot_orig)
+        self.view_comp.video_item.setRotation(rot_comp)
+        
         comp_lbl = QLabel(f"<b>Komprimiert (Mausrad für Zoom, Klicken für Verschieben)</b><br>{comp_meta}")
         comp_lbl.setAlignment(Qt.AlignCenter)
         comp_container = QVBoxLayout()
@@ -280,6 +289,21 @@ class CompareVideoDialog(QDialog):
         self.btn_play = QPushButton("▶️ Play / ⏸️ Pause")
         self.btn_play.clicked.connect(self.toggle_play)
         
+        # Zoom Controls
+        self.btn_zoom_out = QPushButton("➖")
+        self.btn_zoom_out.setFixedWidth(40)
+        self.btn_zoom_out.clicked.connect(self.zoom_out)
+        
+        self.slider_zoom = QSlider(Qt.Horizontal)
+        self.slider_zoom.setRange(100, 500)
+        self.slider_zoom.setValue(100)
+        self.slider_zoom.setFixedWidth(200)
+        self.slider_zoom.valueChanged.connect(self.slider_zoom_changed)
+        
+        self.btn_zoom_in = QPushButton("➕")
+        self.btn_zoom_in.setFixedWidth(40)
+        self.btn_zoom_in.clicked.connect(self.zoom_in)
+        
         self.btn_reset = QPushButton("🔄 Ansicht zurücksetzen")
         self.btn_reset.clicked.connect(self.reset_views)
         
@@ -287,6 +311,12 @@ class CompareVideoDialog(QDialog):
         self.btn_close.clicked.connect(self.close)
         
         btn_layout.addWidget(self.btn_play)
+        btn_layout.addStretch()
+        btn_layout.addWidget(QLabel("Zoom:"))
+        btn_layout.addWidget(self.btn_zoom_out)
+        btn_layout.addWidget(self.slider_zoom)
+        btn_layout.addWidget(self.btn_zoom_in)
+        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_reset)
         btn_layout.addWidget(self.btn_close)
         layout.addLayout(btn_layout)
@@ -298,13 +328,38 @@ class CompareVideoDialog(QDialog):
         self.view_comp.horizontalScrollBar().valueChanged.connect(self.view_orig.horizontalScrollBar().setValue)
         self.view_orig.verticalScrollBar().valueChanged.connect(self.view_comp.verticalScrollBar().setValue)
         self.view_comp.verticalScrollBar().valueChanged.connect(self.view_orig.verticalScrollBar().setValue)
-        self.view_orig.zoom_changed.connect(self.view_comp.set_zoom)
-        self.view_comp.zoom_changed.connect(self.view_orig.set_zoom)
+        self.view_orig.zoom_changed.connect(self.on_view_zoom_changed)
+        self.view_comp.zoom_changed.connect(self.on_view_zoom_changed)
 
         self.player_orig.play()
         self.player_comp.play()
         
+    def slider_zoom_changed(self, value):
+        factor = value / 100.0
+        self.view_orig.set_zoom(factor)
+        self.view_comp.set_zoom(factor)
+
+    def on_view_zoom_changed(self, factor):
+        val = int(factor * 100)
+        if val < 100: val = 100
+        if val > 500: val = 500
+        if self.slider_zoom.value() != val:
+            self.slider_zoom.blockSignals(True)
+            self.slider_zoom.setValue(val)
+            self.slider_zoom.blockSignals(False)
+            self.view_orig.set_zoom(factor)
+            self.view_comp.set_zoom(factor)
+            
+    def zoom_in(self):
+        val = min(self.slider_zoom.value() + 20, 500)
+        self.slider_zoom.setValue(val)
+        
+    def zoom_out(self):
+        val = max(self.slider_zoom.value() - 20, 100)
+        self.slider_zoom.setValue(val)
+        
     def reset_views(self):
+        self.slider_zoom.setValue(100)
         self.view_orig.reset_view()
         self.view_comp.reset_view()
 

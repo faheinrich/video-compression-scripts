@@ -78,6 +78,23 @@ def get_resolution_and_fps(file_path):
     except Exception:
         return None, None, None
 
+def get_video_rotation(file_path):
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream_tags=rotate",
+            "-of", "default=nw=1:nk=1",
+            str(file_path)
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        rot_str = result.stdout.strip()
+        if rot_str:
+            return float(rot_str)
+    except Exception:
+        pass
+    return 0.0
+
 def get_video_info(file_path):
     cmd = [
         "ffprobe", "-v", "error",

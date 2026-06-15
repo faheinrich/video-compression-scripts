@@ -14,6 +14,12 @@ DST_DIR = Path("PATH-TO-OUTPUT-FOLDER")
 
 MAX_JOBS = 2
 
+# --- Sortierung ---
+# "name": Nach Dateiname (A-Z)
+# "size": Nach Dateigröße (Größte zuerst)
+# "duration": Nach Videolänge (Längste zuerst)
+SORT_BY = "size"
+
 # --- Auflösung & FPS ---
 LIMIT_RES = True   
 MAX_RESOLUTION = 1920
@@ -165,7 +171,19 @@ def process_video(src_path):
 
 def main():
     SRC_DIR.mkdir(parents=True, exist_ok=True)
-    video_files = sorted([p for p in SRC_DIR.rglob("*") if p.suffix.lower() in VIDEO_TYPES])
+    video_files = [p for p in SRC_DIR.rglob("*") if p.suffix.lower() in VIDEO_TYPES]
+    
+    if SORT_BY == "size":
+        video_files.sort(key=lambda x: x.stat().st_size, reverse=True)
+    elif SORT_BY == "duration":
+        print("Ermittle Videolängen für die Sortierung... Bitte warten.")
+        durations = {}
+        for f in video_files:
+            dur, _ = get_video_info(f)
+            durations[f] = dur or 0.0
+        video_files.sort(key=lambda x: durations[x], reverse=True)
+    else:
+        video_files.sort(key=lambda x: x.name.lower())
     
     total = len(video_files)
     if total == 0:

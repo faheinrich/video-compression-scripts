@@ -74,6 +74,12 @@ class ArchiverGUI(QMainWindow):
         self.init_archive_tab()
         self.init_compare_tab()
         
+        # Synchronize paths between tabs
+        self.txt_src.textChanged.connect(self.txt_comp_orig.setText)
+        self.txt_dst.textChanged.connect(self.txt_comp_comp.setText)
+        self.txt_comp_orig.setText(self.txt_src.text())
+        self.txt_comp_comp.setText(self.txt_dst.text())
+        
         self.set_original_texts()
         
     def set_original_texts(self):
@@ -161,6 +167,19 @@ class ArchiverGUI(QMainWindow):
                 
         self.cb_flatten = QCheckBox("Ordnerstruktur verwerfen (Flatten - alle Videos direkt in den Zielordner)")
         folder_layout.addWidget(self.cb_flatten)
+        
+        sort_lay = QHBoxLayout()
+        sort_lay.addWidget(QLabel("Sortieren nach:"))
+        self.combo_sort = QComboBox()
+        self.combo_sort.addItems([
+            "Dateigröße (Größte zuerst)",
+            "Videolänge (Längste zuerst)",
+            "Dateiname (A-Z)"
+        ])
+        sort_lay.addWidget(self.combo_sort)
+        sort_lay.addStretch()
+        folder_layout.addLayout(sort_lay)
+        
         config_layout.addWidget(folder_group)
         
         dangerous_group = QGroupBox("⚠️ Gefahrenzone")
@@ -329,6 +348,21 @@ class ArchiverGUI(QMainWindow):
         lay_comp.addWidget(btn_comp_comp)
         folder_layout.addLayout(lay_comp)
         
+        comp_sort_lay = QHBoxLayout()
+        comp_sort_lay.addWidget(QLabel("Sortieren nach:"))
+        self.combo_comp_sort = QComboBox()
+        self.combo_comp_sort.addItems([
+            "Dateiname (A-Z)",
+            "Dateiname (Z-A)",
+            "Dateigröße (Größte zuerst)",
+            "Dateigröße (Kleinste zuerst)",
+            "Videolänge (Längste zuerst)",
+            "Videolänge (Kürzeste zuerst)"
+        ])
+        comp_sort_lay.addWidget(self.combo_comp_sort)
+        comp_sort_lay.addStretch()
+        folder_layout.addLayout(comp_sort_lay)
+        
         self.btn_compare_scan = QPushButton("🔍 Ordner vergleichen")
         self.btn_compare_scan.setStyleSheet("font-weight: bold; padding: 6px; background-color: #3498db; color: white;")
         self.btn_compare_scan.clicked.connect(self.start_compare_scan)
@@ -392,22 +426,43 @@ class ArchiverGUI(QMainWindow):
         self.lbl_global_savings.setText("Gesamt-Ersparnis: 0 B -> 0 B (0.0%) | 💰 Gesparter Speicherplatz: 0 B")
         self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #2c3e50;")
         
-        self.scan_worker = ScanWorker(self.txt_src.text(), self.txt_dst.text(), self.cb_flatten.isChecked())
+        sort_text = self.combo_sort.currentText()
+        if "Dateigröße" in sort_text:
+            sort_by = "size"
+        elif "Videolänge" in sort_text:
+            sort_by = "duration"
+        else:
+            sort_by = "name"
+            
+        self.scan_worker = ScanWorker(self.txt_src.text(), self.txt_dst.text(), self.cb_flatten.isChecked(), sort_by)
         self.scan_worker.file_found.connect(self.on_scan_file_found)
         self.scan_worker.scan_finished.connect(self.on_scan_finished)
         self.scan_worker.start()
     
     @pyqtSlot(dict)
     def on_scan_file_found(self, file_info):
+        filepath = str(file_info['path'])
         filename = file_info['path'].name
+        
+        # Check if another file with the same name already exists in widget_mapping
+        is_duplicate = False
+        for existing_path in self.widget_mapping.keys():
+            if Path(existing_path).name == filename and existing_path != filepath:
+                is_duplicate = True
+                break
+                
+        display_name = filename
+        if is_duplicate:
+            display_name = f"⚠️ {filename}"
+            
         index = self.list_status.count() + 1
         item = QListWidgetItem(self.list_status)
-        custom_widget = VideoItemWidget(filename, file_info['size'], file_info['path'], file_info['dst_path'], index=index)
+        custom_widget = VideoItemWidget(display_name, file_info['size'], file_info['path'], file_info['dst_path'], index=index)
         
         item.setSizeHint(custom_widget.sizeHint())
         self.list_status.addItem(item)
         self.list_status.setItemWidget(item, custom_widget)
-        self.widget_mapping[filename] = custom_widget
+        self.widget_mapping[filepath] = custom_widget
     
     @pyqtSlot(list)
     def on_scan_finished(self, full_list):
@@ -445,10 +500,10 @@ class ArchiverGUI(QMainWindow):
             self.spin_jobs.value(), list(self.video_data_list), current_settings
         )
         self.worker.progress_step.connect(self.on_progress_step)
-        self.worker.status_update.connect(self.on_status_update)
-        self.worker.file_duration_discovered.connect(self.on_file_duration_discovered)
-        self.worker.file_progress.connect(self.on_file_progress)
-        self.worker.ffmpeg_log_line.connect(self.on_ffmpeg_log_line)
+        self.worker.status_update_path.connect(self.on_status_update)
+        self.worker.file_duration_discovered_path.connect(self.on_file_duration_discovered)
+        self.worker.file_progress_path.connect(self.on_file_progress)
+        self.worker.ffmpeg_log_line_path.connect(self.on_ffmpeg_log_line)
         self.worker.finished_all.connect(self.on_finished_all)
         self.worker.start()
     
@@ -471,13 +526,13 @@ class ArchiverGUI(QMainWindow):
         self.lbl_global_progress.setText(f"Gesamtfortschritt: {count} / {self.progress_bar.maximum()}")
     
     @pyqtSlot(str, float)
-    def on_file_duration_discovered(self, filename, duration):
-        if filename in self.widget_mapping: self.widget_mapping[filename].update_duration(duration)
+    def on_file_duration_discovered(self, filepath, duration):
+        if filepath in self.widget_mapping: self.widget_mapping[filepath].update_duration(duration)
     
     @pyqtSlot(str, str, str, dict)
-    def on_status_update(self, filename, status, reason, data_dict):
-        if filename in self.widget_mapping:
-            self.widget_mapping[filename].set_status_style(status, reason, data_dict)
+    def on_status_update(self, filepath, status, reason, data_dict):
+        if filepath in self.widget_mapping:
+            self.widget_mapping[filepath].set_status_style(status, reason, data_dict)
             
             if (status == "finished" or status == "skipped") and data_dict:
                 self.total_src_bytes += data_dict.get('src_size', 0)
@@ -501,13 +556,13 @@ class ArchiverGUI(QMainWindow):
                     self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #c0392b; margin-top: 2px; margin-bottom: 5px;")
     
     @pyqtSlot(str, int)
-    def on_file_progress(self, filename, percentage):
-        if filename in self.widget_mapping: self.widget_mapping[filename].set_progress(percentage)
+    def on_file_progress(self, path, percentage):
+        if path in self.widget_mapping: self.widget_mapping[path].set_progress(percentage)
     
     @pyqtSlot(str, str)
-    def on_ffmpeg_log_line(self, filename, log_line):
-        if filename in self.widget_mapping: self.widget_mapping[filename].append_log(log_line)
-    
+    def on_ffmpeg_log_line(self, path, log_line):
+        if path in self.widget_mapping: self.widget_mapping[path].append_log(log_line)
+
     @pyqtSlot()
     def on_finished_all(self):
         self.btn_scan.setEnabled(True)
@@ -547,7 +602,21 @@ class ArchiverGUI(QMainWindow):
         self.btn_compare_scan.setEnabled(False)
         self.list_compare.clear()
         
-        self.compare_worker = CompareScanWorker(orig_dir, comp_dir)
+        sort_text = self.combo_comp_sort.currentText()
+        if "Dateigröße (Größte" in sort_text:
+            sort_by = "size_desc"
+        elif "Dateigröße (Kleinste" in sort_text:
+            sort_by = "size_asc"
+        elif "Videolänge (Längste" in sort_text:
+            sort_by = "duration_desc"
+        elif "Videolänge (Kürzeste" in sort_text:
+            sort_by = "duration_asc"
+        elif "Dateiname (Z-A)" in sort_text:
+            sort_by = "name_desc"
+        else:
+            sort_by = "name_asc"
+            
+        self.compare_worker = CompareScanWorker(orig_dir, comp_dir, sort_by)
         self.compare_worker.pair_found.connect(self.on_compare_pair_found)
         self.compare_worker.scan_finished.connect(self.on_compare_scan_finished)
         self.compare_worker.start()

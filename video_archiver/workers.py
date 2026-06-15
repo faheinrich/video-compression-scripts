@@ -14,11 +14,12 @@ class ScanWorker(QThread):
     file_found = pyqtSignal(dict)
     scan_finished = pyqtSignal(list)
     
-    def __init__(self, src_dir, dst_dir, flatten=False):
+    def __init__(self, src_dir, dst_dir, flatten=False, sort_by="size"):
         super().__init__()
         self.src_dir = Path(src_dir)
         self.dst_dir = Path(dst_dir)
         self.flatten = flatten
+        self.sort_by = sort_by
         self.video_types = [".mov", ".mp4", ".avi", ".mts", ".ogv", ".m4v", ".mkv"]
     
     def run(self):
@@ -26,7 +27,17 @@ class ScanWorker(QThread):
         try:
             all_files = [p for p in self.src_dir.rglob("*") if
                          p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
-            all_files.sort(key=lambda x: x.name.lower())
+            
+            if self.sort_by == "size":
+                all_files.sort(key=lambda x: x.stat().st_size, reverse=True)
+            elif self.sort_by == "duration":
+                durations = {}
+                for f in all_files:
+                    dur, _, _ = get_video_info(f)
+                    durations[f] = dur or 0.0
+                all_files.sort(key=lambda x: durations[x], reverse=True)
+            else:
+                all_files.sort(key=lambda x: x.name.lower())
             
             for p in all_files:
                 size = p.stat().st_size
@@ -50,6 +61,13 @@ class ArchiveWorker(QThread):
     file_duration_discovered = pyqtSignal(str, float)
     file_progress = pyqtSignal(str, int)
     ffmpeg_log_line = pyqtSignal(str, str)
+    
+    # Pfad-basierte Signale für eindeutige Identifizierung bei doppelten Dateinamen
+    status_update_path = pyqtSignal(str, str, str, dict)
+    file_duration_discovered_path = pyqtSignal(str, float)
+    file_progress_path = pyqtSignal(str, int)
+    ffmpeg_log_line_path = pyqtSignal(str, str)
+    
     finished_all = pyqtSignal()
     
     def __init__(self, src_dir, dst_dir, max_jobs, video_data_list, settings):
@@ -75,6 +93,7 @@ class ArchiveWorker(QThread):
                 src_dur, src_fps, src_audio = get_video_info(src_path)
                 if src_dur:
                     self.file_duration_discovered.emit(src_path.name, src_dur)
+                    self.file_duration_discovered_path.emit(str(src_path), src_dur)
                 
                 p_ffmpeg, skip_reason, log_msg, skip_data = self.start_video_process(src_path, dst_path, src_dur,
                                                                                      src_fps, src_audio)
@@ -82,9 +101,11 @@ class ArchiveWorker(QThread):
                 if skip_reason:
                     count += 1
                     self.status_update.emit(src_path.name, "skipped", skip_reason, skip_data)
+                    self.status_update_path.emit(str(src_path), "skipped", skip_reason, skip_data)
                     self.progress_step.emit(count, log_msg)
                 elif p_ffmpeg:
                     self.status_update.emit(src_path.name, "running", "", {})
+                    self.status_update_path.emit(str(src_path), "running", "", {})
                     self.active_processes.append((p_ffmpeg, src_path, dst_path, src_dur, b""))
             
             still_active = []
@@ -103,24 +124,38 @@ class ArchiveWorker(QThread):
                             decoded_line = line.decode('utf-8', errors='replace').strip()
                             if decoded_line:
                                 self.ffmpeg_log_line.emit(src_path.name, decoded_line)
+                                self.ffmpeg_log_line_path.emit(str(src_path), decoded_line)
+                                
+                                # Extract speed
+                                speed_match = re.search(r'speed=\s*([\d\.]+)x', decoded_line)
+                                speed_str = speed_match.group(1) + "x" if speed_match else ""
+                                
+                                if speed_str:
+                                    # Update status with speed info
+                                    self.status_update_path.emit(str(src_path), "running", speed_str, {})
+                                
                                 if total_dur and total_dur > 0:
                                     current_time = parse_ffmpeg_time(decoded_line)
                                     if current_time is not None:
                                         pct = min(int((current_time / total_dur) * 100), 99)
                                         self.file_progress.emit(src_path.name, pct)
+                                        self.file_progress_path.emit(str(src_path), pct)
                 except Exception:
                     pass
                 
                 poll = p_ffmpeg.poll()
                 if poll is not None:
                     count += 1
-                    self.ffmpeg_log_line.emit(src_path.name, "\\n[INFO] Kopiere Metadaten & Exif-Tags...")
+                    self.ffmpeg_log_line.emit(src_path.name, "\n[INFO] Kopiere Metadaten & Exif-Tags...")
+                    self.ffmpeg_log_line_path.emit(str(src_path), "\n[INFO] Kopiere Metadaten & Exif-Tags...")
                     success_msg, data_dict = self.finalize_video_process(p_ffmpeg, src_path, dst_path)
                     status_str = "finished" if "✅" in success_msg else "error"
                     reason_str = "" if status_str == "finished" else "FFmpeg Fehler"
                     
                     self.file_progress.emit(src_path.name, 100)
+                    self.file_progress_path.emit(str(src_path), 100)
                     self.status_update.emit(src_path.name, status_str, reason_str, data_dict)
+                    self.status_update_path.emit(str(src_path), status_str, reason_str, data_dict)
                     self.progress_step.emit(count, success_msg)
                 else:
                     still_active.append((p_ffmpeg, src_path, dst_path, total_dur, unread_buffer))
@@ -261,10 +296,11 @@ class CompareScanWorker(QThread):
     pair_found = pyqtSignal(dict)
     scan_finished = pyqtSignal(list)
     
-    def __init__(self, orig_dir, comp_dir):
+    def __init__(self, orig_dir, comp_dir, sort_by="name_asc"):
         super().__init__()
         self.orig_dir = Path(orig_dir)
         self.comp_dir = Path(comp_dir)
+        self.sort_by = sort_by
         self.video_types = [".mov", ".mp4", ".avi", ".mts", ".ogv", ".m4v", ".mkv"]
         
     def run(self):
@@ -295,26 +331,49 @@ class CompareScanWorker(QThread):
                 stem = f.stem
                 if stem.endswith("_archived"):
                     stem = stem[:-9] # remove '_archived'
+                if stem.endswith("_source"):
+                    stem = stem[:-7] # remove '_source'
                 comp_dict[stem] = f
 
             # Find matches
             all_stems = set(orig_dict.keys()).union(set(comp_dict.keys()))
             
-            for stem in sorted(all_stems):
+            for stem in all_stems:
                 orig_path = orig_dict.get(stem)
                 comp_path = comp_dict.get(stem)
                 
                 orig_size = orig_path.stat().st_size if orig_path else 0
                 comp_size = comp_path.stat().st_size if comp_path else 0
                 
+                orig_dur = 0.0
+                if orig_path and self.sort_by in ["duration_asc", "duration_desc"]:
+                    orig_dur, _, _ = get_video_info(orig_path)
+                    orig_dur = orig_dur or 0.0
+                
                 pair = {
                     'stem': stem,
                     'orig_path': orig_path,
                     'comp_path': comp_path,
                     'orig_size': orig_size,
-                    'comp_size': comp_size
+                    'comp_size': comp_size,
+                    'orig_dur': orig_dur
                 }
                 pairs.append(pair)
+            
+            if self.sort_by == "size_desc":
+                pairs.sort(key=lambda x: x['orig_size'], reverse=True)
+            elif self.sort_by == "size_asc":
+                pairs.sort(key=lambda x: x['orig_size'])
+            elif self.sort_by == "duration_desc":
+                pairs.sort(key=lambda x: x['orig_dur'], reverse=True)
+            elif self.sort_by == "duration_asc":
+                pairs.sort(key=lambda x: x['orig_dur'])
+            elif self.sort_by == "name_desc":
+                pairs.sort(key=lambda x: x['stem'].lower(), reverse=True)
+            else: # name_asc
+                pairs.sort(key=lambda x: x['stem'].lower())
+
+            for pair in pairs:
                 self.pair_found.emit(pair)
                 
         except Exception as e:
