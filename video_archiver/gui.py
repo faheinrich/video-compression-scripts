@@ -105,8 +105,12 @@ class ArchiverGUI(QMainWindow):
 
     def init_main_content(self):
         layout = QVBoxLayout(self.main_content)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
         
         layout_top = QHBoxLayout()
+        layout_top.setContentsMargins(0, 0, 0, 0)
+        layout_top.setSpacing(5)
         layout_top.addWidget(QLabel("Sortieren nach:"))
         self.combo_comp_sort = QComboBox()
         self.combo_comp_sort.addItems([
@@ -146,6 +150,8 @@ class ArchiverGUI(QMainWindow):
         self.dangerous_group = QGroupBox("⚠️ Gefahrenzone")
         self.dangerous_group.setStyleSheet("QGroupBox { color: #c0392b; font-weight: bold; border: 1px solid #e74c3c; border-radius: 4px; margin-top: 10px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }")
         dangerous_layout = QVBoxLayout(self.dangerous_group)
+        dangerous_layout.setContentsMargins(5, 5, 5, 5)
+        dangerous_layout.setSpacing(5)
         self.cb_flatten = QCheckBox("Ordnerstruktur verwerfen (Flatten - alle Videos direkt in den Zielordner)")
         self.cb_flatten.setStyleSheet("color: #c0392b; font-weight: 500;")
         dangerous_layout.addWidget(self.cb_flatten)
@@ -160,8 +166,12 @@ class ArchiverGUI(QMainWindow):
         
         settings_group = QGroupBox("Video- & Komprimierungs-Optionen")
         settings_grid = QVBoxLayout(settings_group)
+        settings_grid.setContentsMargins(5, 5, 5, 5)
+        settings_grid.setSpacing(5)
         
         row_a = QHBoxLayout()
+        row_a.setContentsMargins(0, 0, 0, 0)
+        row_a.setSpacing(5)
         self.cb_limit_res = QCheckBox("Auflösung limitieren auf max:")
         self.cb_limit_res.setChecked(True)
         self.combo_res = QComboBox()
@@ -184,6 +194,8 @@ class ArchiverGUI(QMainWindow):
         settings_grid.addLayout(row_a)
         
         row_b = QHBoxLayout()
+        row_b.setContentsMargins(0, 0, 0, 0)
+        row_b.setSpacing(5)
         row_b.addWidget(QLabel("Renderer / Codec:"))
         self.combo_renderer = QComboBox()
         self.combo_renderer.addItems(["Software (CPU - libx265)", "Hardware (GPU - Mac Videotoolbox)"])
@@ -199,6 +211,8 @@ class ArchiverGUI(QMainWindow):
         settings_grid.addLayout(row_b)
         
         row_audio = QHBoxLayout()
+        row_audio.setContentsMargins(0, 0, 0, 0)
+        row_audio.setSpacing(5)
         self.cb_copy_aac = QCheckBox("Audio-Pass-Through: Vorhandene AAC-Spuren 1:1 kopieren (verlustfrei)")
         self.cb_copy_aac.setChecked(True)
         row_audio.addWidget(self.cb_copy_aac)
@@ -207,6 +221,7 @@ class ArchiverGUI(QMainWindow):
         self.sw_options_widget = QWidget()
         sw_layout = QHBoxLayout(self.sw_options_widget)
         sw_layout.setContentsMargins(0, 0, 0, 0)
+        sw_layout.setSpacing(5)
         sw_layout.addWidget(QLabel("CRF (Qualität [0-51]):"))
         self.spin_crf = QSpinBox()
         self.spin_crf.setRange(0, 51)
