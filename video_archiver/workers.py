@@ -35,43 +35,51 @@ class UnifiedScanWorker(QThread):
                 comp_files = [p for p in self.dst_dir.rglob("*") if
                              p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
             
-            # Map by stem
-            orig_dict = {f.stem: f for f in orig_files}
+            # Map by relative path to handle duplicate names in different folders
+            orig_dict = {f.relative_to(self.src_dir): f for f in orig_files}
             
             comp_dict = {}
             for f in comp_files:
-                stem = f.stem
+                rel = f.relative_to(self.dst_dir)
+                # Remove '_archived' from name to match source relative path
+                stem = rel.stem
                 if stem.lower().endswith("_archived"):
                     stem = stem[:-9]
                 if stem.lower().endswith("_source"):
                     stem = stem[:-7]
-                comp_dict[stem] = f
-
-            all_stems = set(orig_dict.keys())
+                
+                match_rel = rel.with_name(f"{stem}{orig_files[0].suffix if orig_files else '.mp4'}")
+                # We need a more robust way to match. 
+                # Actually, the original logic used stem, which is why it failed.
+                # If we use relative paths, we need to account for the fact that
+                # dst_path has '_archived' suffix.
+                
+            # Let's rethink. If we have session1/rec1.mp4 and session2/rec1.mp4
+            # They map to session1/rec1_archived.mp4 and session2/rec1_archived.mp4
             
-            # 2. Build list
             results = []
-            for stem in all_stems:
-                src_path = orig_dict[stem]
-                comp_path = comp_dict.get(stem)
-                
+            for src_path in orig_files:
                 rel_path = src_path.relative_to(self.src_dir)
-                if self.flatten:
-                    predicted_dst = self.dst_dir / f"{src_path.stem}_archived.mp4"
-                else:
-                    predicted_dst = self.dst_dir / rel_path.with_name(f"{src_path.stem}_archived.mp4")
+                stem = src_path.stem
                 
-                # Use found comp_path if it exists, otherwise predicted_dst
-                actual_dst = comp_path if comp_path else predicted_dst
+                if self.flatten:
+                    predicted_dst = self.dst_dir / f"{stem}_archived.mp4"
+                else:
+                    predicted_dst = self.dst_dir / rel_path.with_name(f"{stem}_archived.mp4")
+                
+                # Check if it already exists
+                comp_path = None
+                if predicted_dst.exists():
+                    comp_path = predicted_dst
                 
                 item = {
                     'stem': stem,
                     'path': src_path,
-                    'dst_path': actual_dst,
+                    'dst_path': predicted_dst if not comp_path else comp_path,
                     'exists_compressed': comp_path is not None,
                     'size': src_path.stat().st_size,
                     'comp_size': comp_path.stat().st_size if comp_path else 0,
-                    'duration': None # Will be filled if needed
+                    'duration': None
                 }
                 results.append(item)
             
@@ -369,47 +377,71 @@ class CompareScanWorker(QThread):
                 comp_files = [p for p in self.comp_dir.rglob("*") if
                              p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
                 
-            # Create dictionaries for fast lookup by stem (ignoring _archived suffix if present)
-            orig_dict = {}
-            for f in orig_files:
-                # Store by relative path to handle same names in different folders, 
-                # but also by stem to allow flattening.
-                stem = f.stem
-                orig_dict[stem] = f
+            results = []
+            # We iterate over all original files and look for their counterparts
+            for src_path in orig_files:
+                rel_path = src_path.relative_to(self.orig_dir)
+                stem = src_path.stem
                 
-            comp_dict = {}
-            for f in comp_files:
-                stem = f.stem
-                if stem.endswith("_archived"):
-                    stem = stem[:-9] # remove '_archived'
-                if stem.endswith("_source"):
-                    stem = stem[:-7] # remove '_source'
-                comp_dict[stem] = f
-
-            # Find matches
-            all_stems = set(orig_dict.keys()).union(set(comp_dict.keys()))
-            
-            for stem in all_stems:
-                orig_path = orig_dict.get(stem)
-                comp_path = comp_dict.get(stem)
+                # Check for compressed version in the same relative subfolder
+                predicted_comp = self.comp_dir / rel_path.with_name(f"{stem}_archived.mp4")
                 
-                orig_size = orig_path.stat().st_size if orig_path else 0
-                comp_size = comp_path.stat().st_size if comp_path else 0
-                
-                orig_dur = 0.0
-                if orig_path and self.sort_by in ["duration_asc", "duration_desc"]:
-                    orig_dur, _, _ = get_video_info(orig_path)
-                    orig_dur = orig_dur or 0.0
+                comp_path = None
+                if predicted_comp.exists():
+                    comp_path = predicted_comp
+                else:
+                    # Fallback: check if it exists with original name in comp_dir (if it was just copied)
+                    if (self.comp_dir / rel_path).exists():
+                        comp_path = self.comp_dir / rel_path
                 
                 pair = {
                     'stem': stem,
-                    'orig_path': orig_path,
+                    'orig_path': src_path,
                     'comp_path': comp_path,
-                    'orig_size': orig_size,
-                    'comp_size': comp_size,
-                    'orig_dur': orig_dur
+                    'orig_size': src_path.stat().st_size,
+                    'comp_size': comp_path.stat().st_size if comp_path else 0,
+                    'orig_dur': 0.0
                 }
-                pairs.append(pair)
+                
+                if self.sort_by in ["duration_asc", "duration_desc"]:
+                    dur, _, _ = get_video_info(src_path)
+                    pair['orig_dur'] = dur or 0.0
+                
+                results.append(pair)
+            
+            # Also find compressed files that don't have an original (orphans)
+            # This was implicitly handled by the old set(all_stems) logic
+            orig_rel_paths = {p.relative_to(self.orig_dir) for p in orig_files}
+            for c_path in comp_files:
+                c_rel = c_path.relative_to(self.comp_dir)
+                # Try to map back to original rel path
+                c_stem = c_path.stem
+                if c_stem.endswith("_archived"):
+                    c_stem = c_stem[:-9]
+                
+                # Possible original relative paths
+                possible_rels = [
+                    c_rel.with_name(f"{c_stem}{ext}") for ext in self.video_types
+                ]
+                
+                found_orig = False
+                for pr in possible_rels:
+                    if pr in orig_rel_paths:
+                        found_orig = True
+                        break
+                
+                if not found_orig:
+                    # Orphaned compressed file
+                    results.append({
+                        'stem': c_path.stem,
+                        'orig_path': None,
+                        'comp_path': c_path,
+                        'orig_size': 0,
+                        'comp_size': c_path.stat().st_size,
+                        'orig_dur': 0.0
+                    })
+
+            pairs = results
             
             if self.sort_by == "size_desc":
                 pairs.sort(key=lambda x: x['orig_size'], reverse=True)
