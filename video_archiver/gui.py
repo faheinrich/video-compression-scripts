@@ -1,5 +1,6 @@
 import os
 import shutil
+import json
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -283,10 +284,15 @@ class ArchiverGUI(QMainWindow):
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self.export_logs)
         
+        self.btn_save_defaults = QPushButton("📌 Als Standard speichern")
+        self.btn_save_defaults.setStyleSheet("font-weight: bold; padding: 6px; background-color: #34495e; color: white;")
+        self.btn_save_defaults.clicked.connect(self.save_defaults)
+        
         btn_layout.addWidget(self.btn_scan)
         btn_layout.addWidget(self.btn_start)
         btn_layout.addWidget(self.btn_stop)
         btn_layout.addWidget(self.btn_export)
+        btn_layout.addWidget(self.btn_save_defaults)
         layout.addLayout(btn_layout)
         
         self.lbl_global_progress = QLabel("Gesamtfortschritt: 0 / 0")
@@ -303,6 +309,8 @@ class ArchiverGUI(QMainWindow):
         self.list_status.setStyleSheet("QListWidget::item { border-bottom: 1px solid #e0e0e0; }")
         self.list_status.itemClicked.connect(self.toggle_item_log)
         layout.addWidget(self.list_status, stretch=2)
+        
+        self.load_defaults()
 
 
     def toggle_configurations(self, checked):
@@ -619,6 +627,61 @@ class ArchiverGUI(QMainWindow):
                     widget.lbl_name.setText(widget.lbl_name.text() + " [Komp. gelöscht]")
                 except Exception as e:
                     QMessageBox.critical(self, "Fehler", f"Fehler beim Löschen: {e}")
+
+    def save_defaults(self):
+        defaults = {
+            'src_dir': self.txt_src.text(),
+            'dst_dir': self.txt_dst.text(),
+            'limit_res': self.cb_limit_res.isChecked(),
+            'max_res': self.combo_res.currentText(),
+            'limit_fps': self.cb_limit_fps.isChecked(),
+            'max_fps': self.combo_fps.currentText(),
+            'renderer_index': self.combo_renderer.currentIndex(),
+            'max_jobs': self.spin_jobs.value(),
+            'copy_aac': self.cb_copy_aac.isChecked(),
+            'crf': self.spin_crf.value(),
+            'preset': self.combo_preset.currentText(),
+            'vt_quality': self.slider_vt.value(),
+            'flatten': self.cb_flatten.isChecked(),
+            'overwrite': self.cb_overwrite.isChecked(),
+            'dry_run': self.cb_dry_run.isChecked(),
+            'language_index': self.combo_lang.currentIndex()
+        }
+        try:
+            with open('settings.json', 'w', encoding='utf-8') as f:
+                json.dump(defaults, f, indent=4)
+            QMessageBox.information(self, "Erfolg", "Standard-Einstellungen wurden gespeichert.")
+        except Exception as e:
+            QMessageBox.critical(self, "Fehler", f"Fehler beim Speichern der Einstellungen: {e}")
+
+    def load_defaults(self):
+        if not os.path.exists('settings.json'):
+            return
+        try:
+            with open('settings.json', 'r', encoding='utf-8') as f:
+                defaults = json.load(f)
+            
+            if 'src_dir' in defaults: self.txt_src.setText(defaults['src_dir'])
+            if 'dst_dir' in defaults: self.txt_dst.setText(defaults['dst_dir'])
+            if 'limit_res' in defaults: self.cb_limit_res.setChecked(defaults['limit_res'])
+            if 'max_res' in defaults: self.combo_res.setCurrentText(defaults['max_res'])
+            if 'limit_fps' in defaults: self.cb_limit_fps.setChecked(defaults['limit_fps'])
+            if 'max_fps' in defaults: self.combo_fps.setCurrentText(defaults['max_fps'])
+            if 'renderer_index' in defaults: 
+                self.combo_renderer.setCurrentIndex(defaults['renderer_index'])
+                self.on_renderer_changed(defaults['renderer_index'])
+            if 'max_jobs' in defaults: self.spin_jobs.setValue(defaults['max_jobs'])
+            if 'copy_aac' in defaults: self.cb_copy_aac.setChecked(defaults['copy_aac'])
+            if 'crf' in defaults: self.spin_crf.setValue(defaults['crf'])
+            if 'preset' in defaults: self.combo_preset.setCurrentText(defaults['preset'])
+            if 'vt_quality' in defaults: self.slider_vt.setValue(defaults['vt_quality'])
+            if 'flatten' in defaults: self.cb_flatten.setChecked(defaults['flatten'])
+            if 'overwrite' in defaults: self.cb_overwrite.setChecked(defaults['overwrite'])
+            if 'dry_run' in defaults: self.cb_dry_run.setChecked(defaults['dry_run'])
+            if 'language_index' in defaults: self.combo_lang.setCurrentIndex(defaults['language_index'])
+            
+        except Exception as e:
+            print(f"Fehler beim Laden der Einstellungen: {e}")
 
     def init_shared_folder_selection(self, parent_layout):
         folder_group = QGroupBox("Verzeichnis-Einstellungen (Drag & Drop unterstützt)")
