@@ -357,6 +357,10 @@ class CompareVideoDialog(QDialog):
 
         self.player_orig.play()
         self.player_comp.play()
+
+        # Ensure keyboard shortcuts like ESC always lead to proper cleanup.
+        # Otherwise QDialog might only hide/reject without closing immediately.
+        self.setModal(True)
         
     def rotate_video(self, view):
         rot = view.video_item.rotation()
@@ -409,10 +413,45 @@ class CompareVideoDialog(QDialog):
             print(f"DEBUG: Error message: {msg}")
             QMessageBox.critical(self, "Video Fehler", f"Konnte Video nicht laden: {msg}")
             
+    def cleanup_players(self):
+        for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
+            if player is None:
+                continue
+            try:
+                if player.state() == QMediaPlayer.PlayingState:
+                    player.pause()
+                player.stop()
+                player.setMedia(QMediaContent())
+                player.setVideoOutput(None)
+            except Exception:
+                pass
+
     def closeEvent(self, event):
-        self.player_orig.stop()
-        self.player_comp.stop()
+        self.cleanup_players()
         super().closeEvent(event)
+
+    def reject(self):
+        self.cleanup_players()
+        super().reject()
+
+    def accept(self):
+        self.cleanup_players()
+        super().accept()
+
+    def __del__(self):
+        # Extra safety: destructor can help in edge cases where closeEvent
+        # was not reached for some reason.
+        try:
+            for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
+                if player is None:
+                    continue
+                if player.state() == QMediaPlayer.PlayingState:
+                    player.pause()
+                player.stop()
+                player.setMedia(QMediaContent())
+                player.setVideoOutput(None)
+        except Exception:
+            pass
 
 
 class CompareItemWidget(QWidget):
