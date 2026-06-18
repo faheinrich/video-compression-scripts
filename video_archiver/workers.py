@@ -62,10 +62,12 @@ class UnifiedScanWorker(QThread):
                 rel_path = src_path.relative_to(self.src_dir)
                 stem = src_path.stem
                 
+                stem_for_dst = stem[:-9] if stem.lower().endswith("_archived") else stem
+
                 if self.flatten:
-                    predicted_dst = self.dst_dir / f"{stem}_archived.mp4"
+                    predicted_dst = self.dst_dir / f"{stem_for_dst}_archived.mp4"
                 else:
-                    predicted_dst = self.dst_dir / rel_path.with_name(f"{stem}_archived.mp4")
+                    predicted_dst = self.dst_dir / rel_path.with_name(f"{stem_for_dst}_archived.mp4")
                 
                 # Check if it already exists
                 comp_path = None
@@ -383,8 +385,10 @@ class CompareScanWorker(QThread):
                 rel_path = src_path.relative_to(self.orig_dir)
                 stem = src_path.stem
                 
+                stem_for_comp = stem[:-9] if stem.lower().endswith("_archived") else stem
+                
                 # Check for compressed version in the same relative subfolder
-                predicted_comp = self.comp_dir / rel_path.with_name(f"{stem}_archived.mp4")
+                predicted_comp = self.comp_dir / rel_path.with_name(f"{stem_for_comp}_archived.mp4")
                 
                 comp_path = None
                 if predicted_comp.exists():

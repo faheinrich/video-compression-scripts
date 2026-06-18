@@ -584,10 +584,12 @@ class ArchiverGUI(QMainWindow):
             reply = QMessageBox.question(self, "Überschreiben", f"Möchtest du das Original '{orig_path.name}' wirklich mit der komprimierten Version überschreiben?", QMessageBox.Yes | QMessageBox.No)
             if reply == QMessageBox.Yes:
                 try:
-                    shutil.move(str(comp_path), str(orig_path))
+                    new_orig_path = orig_path.with_name(comp_path.name)
+                    shutil.copy2(str(comp_path), str(new_orig_path))
+                    if new_orig_path != orig_path:
+                        orig_path.unlink()
                     widget.btn_overwrite.setEnabled(False)
                     widget.btn_swap.setEnabled(False)
-                    widget.btn_del_comp.setEnabled(False)
                     widget.lbl_name.setText(widget.lbl_name.text() + " [Überschrieben]")
                 except Exception as e:
                     QMessageBox.critical(self, "Fehler", f"Fehler beim Überschreiben: {e}")
@@ -645,7 +647,8 @@ class ArchiverGUI(QMainWindow):
             'flatten': self.cb_flatten.isChecked(),
             'overwrite': self.cb_overwrite.isChecked(),
             'dry_run': self.cb_dry_run.isChecked(),
-            'language_index': self.combo_lang.currentIndex()
+            'language_index': self.combo_lang.currentIndex(),
+            'sort_index': self.combo_comp_sort.currentIndex()
         }
         try:
             with open('settings.json', 'w', encoding='utf-8') as f:
@@ -679,6 +682,7 @@ class ArchiverGUI(QMainWindow):
             if 'overwrite' in defaults: self.cb_overwrite.setChecked(defaults['overwrite'])
             if 'dry_run' in defaults: self.cb_dry_run.setChecked(defaults['dry_run'])
             if 'language_index' in defaults: self.combo_lang.setCurrentIndex(defaults['language_index'])
+            if 'sort_index' in defaults: self.combo_comp_sort.setCurrentIndex(defaults['sort_index'])
             
         except Exception as e:
             print(f"Fehler beim Laden der Einstellungen: {e}")
