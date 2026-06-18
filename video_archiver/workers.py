@@ -469,7 +469,7 @@ class CompareScanWorker(QThread):
         self.scan_finished.emit(pairs)
 
 class ThumbnailSignals(QObject):
-    finished = pyqtSignal(QPixmap)
+    finished = pyqtSignal(object)
 
 class ThumbnailRunnable(QRunnable):
     def __init__(self, video_path):
@@ -478,12 +478,16 @@ class ThumbnailRunnable(QRunnable):
         self.signals = ThumbnailSignals()
 
     def run(self):
-        thumb_path = get_thumbnail_path(self.video_path)
-        if not thumb_path.exists():
-            generate_thumbnail(self.video_path, thumb_path)
-        
-        if thumb_path.exists():
-            pixmap = QPixmap(str(thumb_path))
-            self.signals.finished.emit(pixmap)
-        else:
+        try:
+            thumb_path = get_thumbnail_path(self.video_path)
+            if not thumb_path.exists():
+                generate_thumbnail(self.video_path, thumb_path)
+
+            if thumb_path.exists():
+                pixmap = QPixmap(str(thumb_path))
+                self.signals.finished.emit(pixmap)
+            else:
+                self.signals.finished.emit(None)
+        except Exception as e:
+            print(f"Error generating thumbnail for {self.video_path}: {e}")
             self.signals.finished.emit(None)

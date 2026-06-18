@@ -53,6 +53,11 @@ class VideoItemWidget(QWidget):
         top_layout = QHBoxLayout(self.top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
         
+        self.lbl_thumbnail = QLabel()
+        self.lbl_thumbnail.setFixedSize(60, 40)
+        self.lbl_thumbnail.setStyleSheet("background-color: #ddd; border: 1px solid #ccc;")
+        top_layout.addWidget(self.lbl_thumbnail, stretch=0)
+        
         display_name = f"{index}. {filename}" if index is not None else filename
         self.lbl_name = QLabel(display_name)
         self.lbl_name.setStyleSheet("font-weight: bold;")
@@ -100,6 +105,9 @@ class VideoItemWidget(QWidget):
         top_layout.addWidget(self.lbl_status)
         
         self.main_layout.addWidget(self.top_widget)
+        
+        # Load thumbnail in background
+        self.load_thumbnail(src_path)
         
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
@@ -188,6 +196,16 @@ class VideoItemWidget(QWidget):
     
     def set_progress(self, value):
         self.progress.setValue(value)
+
+    def load_thumbnail(self, video_path):
+        worker = ThumbnailRunnable(video_path)
+        worker.signals.finished.connect(self.on_thumbnail_loaded)
+        QThreadPool.globalInstance().start(worker)
+
+    def on_thumbnail_loaded(self, pixmap):
+        if pixmap:
+            self.lbl_thumbnail.setPixmap(pixmap)
+            self.lbl_thumbnail.setStyleSheet("background-color: transparent; border: 1px solid #ccc;")
 
 
 from PyQt5.QtWidgets import QSizePolicy
@@ -459,6 +477,11 @@ class CompareItemWidget(QWidget):
         super().__init__(parent)
         self.orig_path = orig_path
         self.comp_path = comp_path
+        self.duration_str = "--:--"
+        self.log_visible = False
+        
+        self.orig_size = orig_size
+        self.comp_size = comp_size
         
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(8, 6, 8, 6)
@@ -478,16 +501,7 @@ class CompareItemWidget(QWidget):
         self.lbl_name.setStyleSheet("font-weight: bold; font-size: 12px;")
         info_layout.addWidget(self.lbl_name, stretch=3)
         
-        orig_size_str = format_size(orig_size) if orig_size else "N/A"
-        comp_size_str = format_size(comp_size) if comp_size else "N/A"
-        
-        ratio_str = ""
-        if orig_size and comp_size and orig_size > 0:
-            ratio = (comp_size / orig_size) * 100
-            diff = orig_size - comp_size
-            ratio_str = f" ({ratio:.1f}%) | Ersparnis: {format_size(diff)}"
-            
-        self.lbl_stats = QLabel(f"Original: {orig_size_str}  ➜  Komprimiert: {comp_size_str}{ratio_str}")
+        self.lbl_stats = QLabel(self._get_stats_text())
         self.lbl_stats.setStyleSheet("color: #555; font-size: 11px;")
         info_layout.addWidget(self.lbl_stats, stretch=4)
         
@@ -508,6 +522,12 @@ class CompareItemWidget(QWidget):
         else:
             self.btn_find_comp.setEnabled(False)
         info_layout.addWidget(self.btn_find_comp)
+        
+        self.lbl_status = QLabel("✅ Finished")
+        self.lbl_status.setAlignment(Qt.AlignCenter)
+        self.lbl_status.setFixedWidth(90)
+        self.lbl_status.setStyleSheet("background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
+        info_layout.addWidget(self.lbl_status)
         
         self.main_layout.addLayout(info_layout)
         
@@ -577,6 +597,22 @@ class CompareItemWidget(QWidget):
         if pixmap:
             self.lbl_thumbnail.setPixmap(pixmap)
             self.lbl_thumbnail.setStyleSheet("background-color: transparent; border: 1px solid #ccc;")
+
+    def _get_stats_text(self):
+        orig_size_str = format_size(self.orig_size) if self.orig_size else "N/A"
+        comp_size_str = format_size(self.comp_size) if self.comp_size else "N/A"
+        
+        ratio_str = ""
+        if self.orig_size and self.comp_size and self.orig_size > 0:
+            ratio = (self.comp_size / self.orig_size) * 100
+            diff = self.orig_size - self.comp_size
+            ratio_str = f" ({ratio:.1f}%) | Ersparnis: {format_size(diff)}"
+            
+        return f"⏱️ {self.duration_str}  |  Original: {orig_size_str}  ➜  Komprimiert: {comp_size_str}{ratio_str}"
+
+    def update_duration(self, duration):
+        self.duration_str = format_duration(duration)
+        self.lbl_stats.setText(self._get_stats_text())
 
     def set_action_handler(self, handler):
         self.btn_play.clicked.connect(lambda: handler("play", self))

@@ -412,7 +412,16 @@ class ArchiverGUI(QMainWindow):
             self.list_status.setItemWidget(item, widget)
             self.widget_mapping[filepath] = widget
         else:
-            custom_widget = VideoItemWidget(file_info['path'].name, file_info['size'], file_info['path'], file_info['dst_path'], index=index)
+            # Keep list item UI consistent for both states:
+            # - always show thumbnail/preview (handled by widget)
+            # - always show duration once the worker discovered it (see on_file_duration_discovered)
+            custom_widget = VideoItemWidget(
+                file_info['path'].name,
+                file_info['size'],
+                file_info['path'],
+                file_info['dst_path'],
+                index=index,
+            )
             item.setSizeHint(custom_widget.sizeHint())
             self.list_status.addItem(item)
             self.list_status.setItemWidget(item, custom_widget)
@@ -420,6 +429,15 @@ class ArchiverGUI(QMainWindow):
             self.video_data_list.append(file_info)
             self.total_src_bytes += file_info['size']
             self.update_savings_label()
+
+            # Proactively kick off thumbnail generation for the (yet) uncompressed item.
+            # The widget itself already loads in background, but this ensures we
+            # don't miss cases where load_thumbnail wasn't triggered due to
+            # widget swapping.
+            try:
+                custom_widget.load_thumbnail(file_info['path'])
+            except Exception:
+                pass
     
     @pyqtSlot(list)
     def on_unified_scan_finished(self, full_list):
@@ -531,6 +549,14 @@ class ArchiverGUI(QMainWindow):
                                                          data_dict.get('dst_size', 0), 
                                                          index=i+1)
                             new_widget.set_action_handler(self.handle_compare_action)
+                            # Keep duration/preview information consistent:
+                            # - duration display belongs to the widget's duration_str
+                            # - CompareItemWidget doesn't currently render duration,
+                            #   but the underlying duration discovery should at least
+                            #   not be lost for exporting/logging.
+                            #   We therefore copy the duration_str when available.
+                            if hasattr(widget, "duration_str"):
+                                new_widget.duration_str = getattr(widget, "duration_str", "--:--")
                             item.setSizeHint(new_widget.sizeHint())
                             self.list_status.setItemWidget(item, new_widget)
                             self.widget_mapping[filepath] = new_widget
@@ -549,7 +575,8 @@ class ArchiverGUI(QMainWindow):
         self.btn_scan.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.spin_jobs.setEnabled(True)
-        self.btn_start.setEnabled(False)
+        # Only disable the start button if the list is completely empty
+        self.btn_start.setEnabled(len(getattr(self, 'video_data_list', [])) > 0)
         self.btn_export.setEnabled(True)
 
     def export_logs(self):
