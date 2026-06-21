@@ -9,4 +9,7 @@ I also worked on two tools:
 
 These tools could be combined into a more complete video helper tools suite.
 
+Also, I did not yet review existing open source solutions for all these tasks, this would be important to do.
+- for example: https://github.com/allisonnicoledeal/VideoSync, what do they do? Whats missing for me, what do I do that they dont?...
+
 Workflow: clone the gitlab repos into here, let agents figure out the rest.
