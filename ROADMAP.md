@@ -13,3 +13,6 @@ Also, I did not yet review existing open source solutions for all these tasks, t
 - for example: https://github.com/allisonnicoledeal/VideoSync, what do they do? Whats missing for me, what do I do that they dont?...
 
 Workflow: clone the gitlab repos into here, let agents figure out the rest.
+
+
+- Maybe add a tool: Visual wrapper around rsync to sync folders (internal->harddrive) with a GUI.
