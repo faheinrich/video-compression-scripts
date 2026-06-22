@@ -1,0 +1,13 @@
+server:
+  vad:
+
+  transcription:
+    model: "large-v3"
+    language: "de"
+
+
+client:
+  host: "127.0.0.1"
+  port: 5000  # ?
+
+  whisper_transcription_padding_length_ms: 200

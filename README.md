@@ -175,6 +175,9 @@ The current Python dependency list includes:
 - [ ] Visual quality vs. file size comparison tools
 - [ ] Saveable default settings for each tab
 
+## Who?
+This project was created by and is maintained by me, Fabian Heinrich.
+
 ## License
 
 This project is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/?ref=chooser-v1).

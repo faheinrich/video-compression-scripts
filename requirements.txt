@@ -1,0 +1,17 @@
+numpy
+librosa
+matplotlib
+pympi-ling
+requests
+silero_vad
+tqdm
+PyQt5
+opencv-python
+torch
+torchaudio
+uvicorn
+fastapi
+transformers
+PyQtChart
+i18n
+onnxruntime

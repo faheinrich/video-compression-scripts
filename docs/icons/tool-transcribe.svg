@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tx-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9b59b6" />
+      <stop offset="100%" stop-color="#8e44ad" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-opacity="0.15" />
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#tx-grad)" filter="url(#shadow)" />
+  <g transform="translate(73, 68)" stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Waveform on left -->
+    <path d="M10 40 v40 M25 20 v80 M40 30 v60" />
+    <!-- Document lines on right -->
+    <path d="M70 30 h35 M70 60 h35 M70 90 h20" />
+    <path d="M55 20 h0" opacity="0.3"/> <!-- subtle separator -->
+  </g>
+</svg>
