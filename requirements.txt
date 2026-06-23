@@ -15,3 +15,4 @@ transformers
 PyQtChart
 i18n
 onnxruntime
+pyinstaller

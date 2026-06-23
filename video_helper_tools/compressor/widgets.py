@@ -620,6 +620,35 @@ class CompareItemWidget(QWidget):
         self.duration_str = format_duration(duration)
         self.lbl_stats.setText(self._get_stats_text())
 
+    def set_status_style(self, status, detail_text="", extra_data=None):
+        status = status.lower()
+        if status == "planned":
+            self.lbl_status.setText(_("⏳ Planned"))
+            self.lbl_status.setStyleSheet(
+                "background-color: #7f8c8d; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
+        elif status == "running":
+            if detail_text:
+                self.lbl_status.setText(f"⚡ Läuft ({detail_text})")
+            else:
+                self.lbl_status.setText(_("⚡ Running"))
+            self.lbl_status.setStyleSheet(
+                "background-color: #f1c40f; color: black; border-radius: 4px; padding: 3px; font-size: 11px; font-weight: bold;")
+        elif status == "finished":
+            self.lbl_status.setText(_("✅ Finished"))
+            self.lbl_status.setStyleSheet(
+                "background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
+            if extra_data and 'dst_size' in extra_data:
+                self.comp_size = extra_data['dst_size']
+                self.lbl_stats.setText(self._get_stats_text())
+        elif status == "error":
+            self.lbl_status.setText(_("❌ Error"))
+            self.lbl_status.setStyleSheet(
+                "background-color: #e74c3c; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
+        elif status == "skipped":
+            self.lbl_status.setText(_("⏭️ Skipped"))
+            self.lbl_status.setStyleSheet(
+                "background-color: #34495e; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
+
     def set_action_handler(self, handler):
         self.btn_play.clicked.connect(lambda: handler("play", self))
         self.btn_overwrite.clicked.connect(lambda: handler("overwrite", self))

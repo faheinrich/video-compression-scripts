@@ -529,7 +529,8 @@ class ArchiverGUI(QWidget):
     def on_status_update(self, filepath, status, reason, data_dict):
         if filepath in self.widget_mapping:
             widget = self.widget_mapping[filepath]
-            widget.set_status_style(status, reason, data_dict)
+            if hasattr(widget, 'set_status_style'):
+                widget.set_status_style(status, reason, data_dict)
             
             if (status == "finished" or status == "skipped") and data_dict:
                 self.total_src_bytes += data_dict.get('src_size', 0)
@@ -560,11 +561,17 @@ class ArchiverGUI(QWidget):
     
     @pyqtSlot(str, int)
     def on_file_progress(self, path, percentage):
-        if path in self.widget_mapping: self.widget_mapping[path].set_progress(percentage)
+        if path in self.widget_mapping:
+            widget = self.widget_mapping[path]
+            if hasattr(widget, 'set_progress'):
+                widget.set_progress(percentage)
     
     @pyqtSlot(str, str)
     def on_ffmpeg_log_line(self, path, log_line):
-        if path in self.widget_mapping: self.widget_mapping[path].append_log(log_line)
+        if path in self.widget_mapping:
+            widget = self.widget_mapping[path]
+            if hasattr(widget, 'append_log'):
+                widget.append_log(log_line)
 
     @pyqtSlot()
     def on_finished_all(self):

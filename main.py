@@ -10,13 +10,15 @@ from PyQt5.QtCore import Qt, QSize
 from video_helper_tools.compressor.gui import ArchiverGUI
 from video_helper_tools.sync.gui import VideoSyncGUI
 from video_helper_tools.transcriber.gui import WhisperGui
+from video_helper_tools.rsync_gui.gui import RsyncSyncGUI
 
 class LandingPage(QWidget):
-    def __init__(self, open_compressor, open_sync, open_transcriber):
+    def __init__(self, open_compressor, open_sync, open_transcriber, open_rsync):
         super().__init__()
         self.open_compressor = open_compressor
         self.open_sync = open_sync
         self.open_transcriber = open_transcriber
+        self.open_rsync = open_rsync
         self.init_ui()
 
     def init_ui(self):
@@ -25,7 +27,8 @@ class LandingPage(QWidget):
         layout.setSpacing(18)
 
         logo = QLabel()
-        logo_path = os.path.join(os.path.dirname(__file__), "docs", "armadillo-logo.png")
+        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        logo_path = os.path.join(base_dir, "docs", "armadillo-logo.png")
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             logo.setPixmap(pixmap.scaledToWidth(180, Qt.SmoothTransformation))
@@ -84,7 +87,8 @@ class LandingPage(QWidget):
                 }
             """)
             
-            icon_path = Path(__file__).resolve().parent / "docs" / "icons" / icon_name
+            base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+            icon_path = Path(base_dir) / "docs" / "icons" / icon_name
             if icon_path.exists():
                 btn.setIcon(QIcon(str(icon_path)))
                 btn.setIconSize(QSize(120, 120))
@@ -102,10 +106,12 @@ class LandingPage(QWidget):
         self.btn_compressor = create_tool_button("Compress & Archive", "tool-compressor.svg", self.open_compressor)
         self.btn_sync = create_tool_button("Sync Videos", "tool-sync.svg", self.open_sync)
         self.btn_transcribe = create_tool_button("Transcribe Audio", "tool-transcribe.svg", self.open_transcriber)
+        self.btn_rsync = create_tool_button("Backup (Rsync)", "tool-sync.svg", self.open_rsync) # reusing sync icon
 
         btn_row.addWidget(self.btn_compressor)
         btn_row.addWidget(self.btn_sync)
         btn_row.addWidget(self.btn_transcribe)
+        btn_row.addWidget(self.btn_rsync)
         layout.addLayout(btn_row)
         layout.addStretch()
 
@@ -121,7 +127,8 @@ class VideoHelperToolsSuite(QMainWindow):
         self.resize(1100, 850)
         
         # Set Application Icon
-        icon_path = os.path.join(os.path.dirname(__file__), "docs", "icons", "video-helper-tools-512.png")
+        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(base_dir, "docs", "icons", "video-helper-tools-512.png")
         if os.path.exists(icon_path):
             icon = QIcon(icon_path)
             self.setWindowIcon(icon)
@@ -136,8 +143,9 @@ class VideoHelperToolsSuite(QMainWindow):
         self.compressor_tab = None
         self.sync_tab = None
         self.transcription_tab = None
+        self.rsync_tab = None
 
-        self.landing_page = LandingPage(self.show_compressor, self.show_sync, self.show_transcribe)
+        self.landing_page = LandingPage(self.show_compressor, self.show_sync, self.show_transcribe, self.show_rsync)
         self.landing_page.about_btn.clicked.connect(self.show_about)
         self.landing_page.lang_combo.currentIndexChanged.connect(self.change_language)
         self.layout.addWidget(self.landing_page)
@@ -179,6 +187,13 @@ class VideoHelperToolsSuite(QMainWindow):
             self.transcription_tab = WhisperGui()
             self.transcription_tab = self._wrap_with_back(self.transcription_tab)
         self.layout.addWidget(self.transcription_tab)
+
+    def show_rsync(self):
+        self.clear_content()
+        if self.rsync_tab is None:
+            self.rsync_tab = RsyncSyncGUI()
+            self.rsync_tab = self._wrap_with_back(self.rsync_tab)
+        self.layout.addWidget(self.rsync_tab)
 
     def _wrap_with_back(self, widget):
         container = QWidget()
@@ -257,11 +272,20 @@ class VideoHelperToolsSuite(QMainWindow):
             pass
 
 def main():
+    # Fix PATH for bundled macOS apps so they can find ffmpeg, ffprobe, and exiftool
+    if sys.platform == 'darwin':
+        paths = os.environ.get('PATH', '').split(os.pathsep)
+        for path in ['/usr/local/bin', '/opt/homebrew/bin']:
+            if path not in paths:
+                paths.insert(0, path)
+        os.environ['PATH'] = os.pathsep.join(paths)
+
     app = QApplication(sys.argv)
     app.setApplicationName("Video Helper Tools")
     
     # Load custom font if exists
-    font_path = os.path.join(os.path.dirname(__file__), "Nohemi-Regular-BF6438cc58b98fc.otf")
+    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    font_path = os.path.join(base_dir, "Nohemi-Regular-BF6438cc58b98fc.otf")
     if os.path.exists(font_path):
         font_id = QFontDatabase.addApplicationFont(font_path)
         if font_id != -1:

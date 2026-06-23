@@ -35,20 +35,12 @@ It is intended for:
 - GUI with live logs, progress display, and side-by-side preview
 - Apple Photos compatibility fix for HEVC videos
 
-<p align="center">
-  <img src="docs/armadillo-logo.png" alt="Compression Tool Logo" width="220">
-</p>
-
-![Compression GUI Demo](docs/gui-demo-screenshot.png)
-
 ### Sync Videos
 
 - Extracts audio from two videos with FFmpeg
 - Calculates offset between tracks
 - Applies the detected shift to synchronize clips
 - Includes a GUI for waveform visualization and preview before saving
-
-![Sync GUI Demo](docs/sync-gui-demo.png)
 
 ### Transcribe Audio
 
@@ -57,8 +49,6 @@ It is intended for:
 - Writes results into ELAN `.eaf` files for later annotation
 - Supports single-file and batch-style workflows through the GUI
 - Can run locally or against a remote server
-
-![Transcription GUI Demo](docs/gui-demo-screenshot.png)
 
 ## Installation
 
@@ -95,6 +85,22 @@ Start the combined desktop application with:
 ```bash
 python main.py
 ```
+
+## Building a Standalone Application
+
+You can package the application into a standalone macOS `.app` bundle or Windows `.exe` using PyInstaller.
+
+To build the app, run the included script:
+
+```bash
+# macOS / Linux
+./build.sh
+
+# Windows (or cross-platform)
+python build.py
+```
+
+The bundled executable will be created in the `dist` directory. Please note that because of dependencies like PyTorch and OpenCV, the resulting application bundle will be large.
 
 This launches the PyQt5 window with tabs for:
 
