@@ -1,7 +1,7 @@
 import sys
 import os
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSizePolicy, QComboBox
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSizePolicy, QComboBox, QMessageBox
 from PyQt5.QtGui import QIcon, QFontDatabase, QFont, QPixmap
 from PyQt5.QtCore import Qt, QSize
 
@@ -271,14 +271,33 @@ class VideoHelperToolsSuite(QMainWindow):
         except Exception as e:
             pass
 
+    def closeEvent(self, event):
+        worker = getattr(self.compressor_tab, 'worker', None) if self.compressor_tab is not None else None
+        if worker is not None and worker.isRunning():
+            reply = QMessageBox.question(
+                self, "Archivierung läuft",
+                "Es läuft noch eine Archivierung. Wirklich beenden?\n"
+                "Laufende Kompressionen werden abgebrochen und ihre Zieldateien gelöscht.",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            worker.stop()
+            worker.wait()
+        event.accept()
+
 def main():
     # Fix PATH for bundled macOS apps so they can find ffmpeg, ffprobe, and exiftool
-    if sys.platform == 'darwin':
-        paths = os.environ.get('PATH', '').split(os.pathsep)
-        for path in ['/usr/local/bin', '/opt/homebrew/bin']:
-            if path not in paths:
-                paths.insert(0, path)
-        os.environ['PATH'] = os.pathsep.join(paths)
+    try:
+        if sys.platform == 'darwin':
+            paths = os.environ.get('PATH', '').split(os.pathsep)
+            for path in ['/usr/local/bin', '/opt/homebrew/bin']:
+                if path not in paths:
+                    paths.insert(0, path)
+            os.environ['PATH'] = os.pathsep.join(paths)
+    except Exception as e:
+        print(f"Error setting path: {e}")
 
     app = QApplication(sys.argv)
     app.setApplicationName("Video Helper Tools")

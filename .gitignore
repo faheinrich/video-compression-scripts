@@ -35,3 +35,22 @@ Temporary Items
 *.icloud
 
 # End of https://www.toptal.com/developers/gitignore/api/macos
+
+### Project-specific ###
+# Python bytecode
+__pycache__/
+*.pyc
+
+# PyInstaller build/dist output
+build/
+dist/
+*.spec
+
+# IDE
+.idea/
+
+# Local runtime config (contains machine-specific paths)
+settings.json
+
+# Generated thumbnail cache
+thumbnails/

@@ -289,8 +289,7 @@ class CompareVideoDialog(QDialog):
         self.view_orig.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         self.player_orig.error.connect(self.handle_player_error)
-        self.player_orig.mediaStatusChanged.connect(lambda s: print(f"DEBUG: Orig player status: {s}"))
-        
+
         orig_lbl = QLabel(f"<b>Original (Mausrad für Zoom, Klicken für Verschieben)</b><br>{orig_meta}")
         orig_lbl.setAlignment(Qt.AlignCenter)
         orig_container = QVBoxLayout()
@@ -309,8 +308,7 @@ class CompareVideoDialog(QDialog):
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         self.player_comp.error.connect(self.handle_player_error)
-        self.player_comp.mediaStatusChanged.connect(lambda s: print(f"DEBUG: Comp player status: {s}"))
-        
+
         # Apply rotation
         rot_orig = get_video_rotation(orig_path)
         rot_comp = get_video_rotation(comp_path)
@@ -367,8 +365,6 @@ class CompareVideoDialog(QDialog):
         btn_layout.addWidget(self.btn_close)
         layout.addLayout(btn_layout)
         
-        print(f"DEBUG: Loading orig_path: {orig_path}")
-        print(f"DEBUG: Loading comp_path: {comp_path}")
         self.player_orig.setMedia(QMediaContent(QUrl.fromLocalFile(str(orig_path.resolve()))))
         self.player_comp.setMedia(QMediaContent(QUrl.fromLocalFile(str(comp_path.resolve()))))
         
@@ -431,10 +427,8 @@ class CompareVideoDialog(QDialog):
             self.player_comp.play()
             
     def handle_player_error(self, error):
-        print(f"DEBUG: Player error occurred: {error}")
         if error != QMediaPlayer.NoError:
             msg = self.sender().errorString()
-            print(f"DEBUG: Error message: {msg}")
             QMessageBox.critical(self, "Video Fehler", f"Konnte Video nicht laden: {msg}")
             
     def cleanup_players(self):

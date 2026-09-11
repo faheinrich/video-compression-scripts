@@ -423,8 +423,9 @@ class ArchiverGUI(QWidget):
             self.list_status.setItemWidget(item, custom_widget)
             self.widget_mapping[filepath] = custom_widget
             self.video_data_list.append(file_info)
-            self.total_src_bytes += file_info['size']
-            self.update_savings_label()
+            # Note: total_src_bytes/total_dst_bytes are only tracked once a file is
+            # actually finished/skipped (see on_status_update) — counting the planned
+            # size here too would double-count it once processing completes.
 
             # Proactively kick off thumbnail generation for the (yet) uncompressed item.
             # The widget itself already loads in background, but this ensures we

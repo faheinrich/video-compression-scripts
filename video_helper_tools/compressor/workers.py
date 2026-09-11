@@ -24,39 +24,11 @@ class UnifiedScanWorker(QThread):
         self.video_types = [".mov", ".mp4", ".avi", ".mts", ".ogv", ".m4v", ".mkv"]
     
     def run(self):
-        local_list = []
         try:
-            # 1. Gather all files
+            # 1. Gather all source files
             orig_files = [p for p in self.src_dir.rglob("*") if
                           p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
-            
-            comp_files = []
-            if self.dst_dir.exists() and self.dst_dir.is_dir():
-                comp_files = [p for p in self.dst_dir.rglob("*") if
-                             p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
-            
-            # Map by relative path to handle duplicate names in different folders
-            orig_dict = {f.relative_to(self.src_dir): f for f in orig_files}
-            
-            comp_dict = {}
-            for f in comp_files:
-                rel = f.relative_to(self.dst_dir)
-                # Remove '_archived' from name to match source relative path
-                stem = rel.stem
-                if stem.lower().endswith("_archived"):
-                    stem = stem[:-9]
-                if stem.lower().endswith("_source"):
-                    stem = stem[:-7]
-                
-                match_rel = rel.with_name(f"{stem}{orig_files[0].suffix if orig_files else '.mp4'}")
-                # We need a more robust way to match. 
-                # Actually, the original logic used stem, which is why it failed.
-                # If we use relative paths, we need to account for the fact that
-                # dst_path has '_archived' suffix.
-                
-            # Let's rethink. If we have session1/rec1.mp4 and session2/rec1.mp4
-            # They map to session1/rec1_archived.mp4 and session2/rec1_archived.mp4
-            
+
             results = []
             for src_path in orig_files:
                 rel_path = src_path.relative_to(self.src_dir)
@@ -118,11 +90,7 @@ class UnifiedScanWorker(QThread):
 
 class ArchiveWorker(QThread):
     progress_step = pyqtSignal(int, str)
-    status_update = pyqtSignal(str, str, str, dict)
-    file_duration_discovered = pyqtSignal(str, float)
-    file_progress = pyqtSignal(str, int)
-    ffmpeg_log_line = pyqtSignal(str, str)
-    
+
     # Pfad-basierte Signale für eindeutige Identifizierung bei doppelten Dateinamen
     status_update_path = pyqtSignal(str, str, str, dict)
     file_duration_discovered_path = pyqtSignal(str, float)
@@ -153,19 +121,16 @@ class ArchiveWorker(QThread):
                 
                 src_dur, src_fps, src_audio = get_video_info(src_path)
                 if src_dur:
-                    self.file_duration_discovered.emit(src_path.name, src_dur)
                     self.file_duration_discovered_path.emit(str(src_path), src_dur)
-                
+
                 p_ffmpeg, skip_reason, log_msg, skip_data = self.start_video_process(src_path, dst_path, src_dur,
                                                                                      src_fps, src_audio)
-                
+
                 if skip_reason:
                     count += 1
-                    self.status_update.emit(src_path.name, "skipped", skip_reason, skip_data)
                     self.status_update_path.emit(str(src_path), "skipped", skip_reason, skip_data)
                     self.progress_step.emit(count, log_msg)
                 elif p_ffmpeg:
-                    self.status_update.emit(src_path.name, "running", "", {})
                     self.status_update_path.emit(str(src_path), "running", "", {})
                     self.active_processes.append((p_ffmpeg, src_path, dst_path, src_dur, b""))
             
@@ -184,22 +149,20 @@ class ArchiveWorker(QThread):
                         for line in lines:
                             decoded_line = line.decode('utf-8', errors='replace').strip()
                             if decoded_line:
-                                self.ffmpeg_log_line.emit(src_path.name, decoded_line)
                                 self.ffmpeg_log_line_path.emit(str(src_path), decoded_line)
-                                
+
                                 # Extract speed
                                 speed_match = re.search(r'speed=\s*([\d\.]+)x', decoded_line)
                                 speed_str = speed_match.group(1) + "x" if speed_match else ""
-                                
+
                                 if speed_str:
                                     # Update status with speed info
                                     self.status_update_path.emit(str(src_path), "running", speed_str, {})
-                                
+
                                 if total_dur and total_dur > 0:
                                     current_time = parse_ffmpeg_time(decoded_line)
                                     if current_time is not None:
                                         pct = min(int((current_time / total_dur) * 100), 99)
-                                        self.file_progress.emit(src_path.name, pct)
                                         self.file_progress_path.emit(str(src_path), pct)
                 except Exception:
                     pass
@@ -207,15 +170,12 @@ class ArchiveWorker(QThread):
                 poll = p_ffmpeg.poll()
                 if poll is not None:
                     count += 1
-                    self.ffmpeg_log_line.emit(src_path.name, "\n[INFO] Kopiere Metadaten & Exif-Tags...")
                     self.ffmpeg_log_line_path.emit(str(src_path), "\n[INFO] Kopiere Metadaten & Exif-Tags...")
                     success_msg, data_dict = self.finalize_video_process(p_ffmpeg, src_path, dst_path)
                     status_str = "finished" if "✅" in success_msg else "error"
                     reason_str = "" if status_str == "finished" else "FFmpeg Fehler"
-                    
-                    self.file_progress.emit(src_path.name, 100)
+
                     self.file_progress_path.emit(str(src_path), 100)
-                    self.status_update.emit(src_path.name, status_str, reason_str, data_dict)
                     self.status_update_path.emit(str(src_path), status_str, reason_str, data_dict)
                     self.progress_step.emit(count, success_msg)
                 else:
@@ -307,35 +267,42 @@ class ArchiveWorker(QThread):
     
     def finalize_video_process(self, p_ffmpeg, src_path, dst_path):
         data_dict = {}
+        if p_ffmpeg.returncode != 0:
+            if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
+            return f"❌ FEHLER bei {src_path.name}: FFmpeg Returncode {p_ffmpeg.returncode}", data_dict
+
+        # Metadata copy is best-effort: a failure here (e.g. exotic tags, missing
+        # exiftool) must not throw away an otherwise successfully compressed video.
+        metadata_warning = ""
         try:
-            if p_ffmpeg.returncode != 0:
-                if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
-                return f"❌ FEHLER bei {src_path.name}: FFmpeg Returncode {p_ffmpeg.returncode}", data_dict
-            
             subprocess.run(
                 ["exiftool", "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
                  str(dst_path), "-overwrite_original", "-q"], check=True)
             stat = src_path.stat()
             os.utime(dst_path, (stat.st_atime, stat.st_mtime))
-            
+        except Exception as e:
+            metadata_warning = f" ⚠️ (Metadaten konnten nicht kopiert werden: {e})"
+
+        try:
             src_size = src_path.stat().st_size
             dst_size = dst_path.stat().st_size
-            diff_size = src_size - dst_size
-            ratio = (dst_size / src_size) * 100
-            
-            data_dict = {'src_size': src_size, 'dst_size': dst_size, 'diff_size': diff_size, 'ratio': ratio}
-            result_msg = f"✅ FINISH: {src_path.name} | {format_size(src_size)} -> {format_size(dst_size)} ({ratio:.1f}%)"
-            
-            if dst_size >= src_size:
-                rel_path = src_path.relative_to(self.src_dir)
-                backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
-                shutil.copy2(src_path, backup_path)
-                result_msg += " ⚠️ (Original kopiert)"
-            
-            return result_msg, data_dict
-        except Exception as e:
+        except OSError as e:
             if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
             return f"❌ FEHLER bei Nachbearbeitung von {src_path.name}: {str(e)}", data_dict
+
+        diff_size = src_size - dst_size
+        ratio = (dst_size / src_size) * 100 if src_size > 0 else 100.0
+
+        data_dict = {'src_size': src_size, 'dst_size': dst_size, 'diff_size': diff_size, 'ratio': ratio}
+        result_msg = f"✅ FINISH: {src_path.name} | {format_size(src_size)} -> {format_size(dst_size)} ({ratio:.1f}%){metadata_warning}"
+
+        if dst_size >= src_size:
+            rel_path = src_path.relative_to(self.src_dir)
+            backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
+            shutil.copy2(src_path, backup_path)
+            result_msg += " ⚠️ (Original kopiert)"
+
+        return result_msg, data_dict
     
     def stop(self):
         self.is_running = False
