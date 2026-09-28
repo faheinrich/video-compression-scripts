@@ -27,14 +27,14 @@ def test_compressor_defaults_survive_a_different_cwd(qapp, tmp_path, monkeypatch
 
     monkeypatch.chdir(first)
     gui = ArchiverGUI()
-    gui.spin_crf.setValue(27)
+    gui.slider_crf.setValue(27)
     gui.combo_preset.setCurrentText("veryslow")
     gui.save_defaults()
     assert not (first / "settings.json").exists()
 
     monkeypatch.chdir(second)
     reloaded = ArchiverGUI()
-    assert reloaded.spin_crf.value() == 27
+    assert reloaded.slider_crf.value() == 27
     assert reloaded.combo_preset.currentText() == "veryslow"
 
 

@@ -38,7 +38,7 @@ def run_archive(qapp, gui, src, dst, renderer_index=0, crf=None):
     gui.combo_renderer.setCurrentIndex(renderer_index)
     gui.combo_preset.setCurrentText("ultrafast")
     if crf is not None:
-        gui.spin_crf.setValue(crf)
+        gui.slider_crf.setValue(crf)
     gui.spin_jobs.setValue(2)
     scan(qapp, gui, src, dst)
     gui.start_archiving()
@@ -158,16 +158,46 @@ def test_home_relative_paths_are_expanded(qapp, make_gui, tmp_path, monkeypatch)
 def test_quality_presets_and_custom_values(qapp, make_gui):
     gui = make_gui()
     gui.apply_quality_preset("small")
-    assert (gui.spin_crf.value(), gui.spin_vt.value()) == (26, 45)
+    assert (gui.slider_crf.value(), gui.slider_vt.value()) == (26, 45)
     assert gui.quality_buttons["small"].isChecked()
 
-    # Changing an advanced value on either encoder turns the preset into "custom".
-    gui.spin_vt.setValue(70)
+    # "Custom" follows the selected encoder's value.
+    gui.combo_renderer.setCurrentIndex(1)  # VideoToolbox
+    gui.slider_vt.setValue(70)
     assert not any(b.isChecked() for b in gui.quality_buttons.values())
     assert "70" in gui.quality_hint.text()
+    gui.combo_renderer.setCurrentIndex(0)  # CPU still matches "small"
+    assert gui.quality_buttons["small"].isChecked()
 
     gui.apply_quality_preset("archive")
     assert gui.quality_buttons["archive"].isChecked()
+
+
+def test_only_the_selected_encoders_quality_controls_are_shown(qapp, make_gui):
+    gui = make_gui()
+    gui.show()
+    gui.btn_advanced.setChecked(True)
+    gui.combo_renderer.setCurrentIndex(0)
+    assert gui.cpu_quality.isVisible() and not gui.gpu_quality.isVisible()
+    gui.combo_renderer.setCurrentIndex(1)
+    assert gui.gpu_quality.isVisible() and not gui.cpu_quality.isVisible()
+
+
+@pytest.mark.parametrize("language", ["de", "en"])
+@pytest.mark.parametrize("renderer_index", [0, 1])
+def test_settings_drawer_fits_without_clipping(qapp, make_gui, language, renderer_index):
+    # Regression: long checkbox labels made the drawer content wider than the drawer.
+    from video_helper_tools.core import i18n
+
+    i18n.set_language(language)
+    gui = make_gui()
+    gui.resize(1200, 800)
+    gui.show()
+    gui.btn_advanced.setChecked(True)
+    gui.combo_renderer.setCurrentIndex(renderer_index)
+    qapp.processEvents()
+    content = gui.drawer_scroll.widget()
+    assert content.minimumSizeHint().width() <= gui.drawer_scroll.viewport().width()
 
 
 def test_parallel_videos_accept_custom_values(qapp, make_gui):

@@ -9,7 +9,7 @@ from PySide6.QtGui import QFontDatabase, QIntValidator, QKeySequence, QPixmap, Q
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QScrollArea, QSpinBox, QStyle, QTableView, QToolButton, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QSlider, QStyle, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from video_helper_tools.core.i18n import tr
@@ -313,6 +313,25 @@ class ArchiverGUI(QWidget):
         self.table.doubleClicked.connect(self.on_row_double_clicked)
         return self.table
 
+    def slider_row(self, label, minimum, maximum, tooltip):
+        box = QWidget()
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(minimum, maximum)
+        slider.setToolTip(tooltip)
+        value = QLabel()
+        value.setMinimumWidth(24)
+        value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        slider.valueChanged.connect(lambda v: value.setText(str(v)))
+        row.addWidget(slider, stretch=1)
+        row.addWidget(value)
+        column.addLayout(row)
+        return box, slider, value
+
     def segment(self, text, key):
         button = QPushButton(text)
         button.setCheckable(True)
@@ -322,13 +341,15 @@ class ArchiverGUI(QWidget):
 
     def build_drawer(self):
         drawer = QFrame(objectName="drawer")
-        drawer.setFixedWidth(330)
+        drawer.setFixedWidth(340)
         outer = QVBoxLayout(drawer)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
+        self.drawer_scroll = scroll
         content = QWidget()
         scroll.setWidget(content)
         layout = QVBoxLayout(content)
@@ -416,42 +437,38 @@ class ArchiverGUI(QWidget):
         adv.setContentsMargins(0, 0, 0, 0)
         adv.setSpacing(8)
 
-        adv_grid = QGridLayout()
-        adv_grid.setHorizontalSpacing(10)
-        self.lbl_cpu = QLabel(tr("CPU (libx265)"))
-        self.lbl_cpu.setStyleSheet("font-weight: 600;")
-        adv_grid.addWidget(self.lbl_cpu, 0, 0, 1, 2)
-        self.spin_crf = QSpinBox()
-        self.spin_crf.setRange(0, 51)
-        self.spin_crf.setToolTip(tr("Lower is better quality and larger files. 18-19 is visually lossless, 20-23 the sweet spot for archives."))
+        # Only the controls of the selected encoder are shown (see update_quality_state).
+        self.cpu_quality, self.slider_crf, _ = self.slider_row(
+            tr("CRF"), 0, 51,
+            tr("Lower is better quality and larger files. 18-19 is visually lossless, 20-23 the sweet spot for archives."))
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel(tr("Preset")))
         self.combo_preset = QComboBox()
         self.combo_preset.addItems(X265_PRESETS)
         self.combo_preset.setCurrentText("slow")
         self.combo_preset.setToolTip(tr("Slower presets give smaller files at the same quality."))
-        adv_grid.addWidget(QLabel(tr("CRF (0-51)")), 1, 0)
-        adv_grid.addWidget(self.spin_crf, 1, 1)
-        adv_grid.addWidget(QLabel(tr("Preset")), 2, 0)
-        adv_grid.addWidget(self.combo_preset, 2, 1)
-        self.lbl_gpu = QLabel(tr("Mac GPU (VideoToolbox)"))
-        self.lbl_gpu.setStyleSheet("font-weight: 600;")
-        adv_grid.addWidget(self.lbl_gpu, 3, 0, 1, 2)
-        self.spin_vt = QSpinBox()
-        self.spin_vt.setRange(1, 100)
-        self.spin_vt.setToolTip(tr("Higher is better quality and larger files. 45-55 balanced, 60-75 almost visually lossless."))
-        adv_grid.addWidget(QLabel(tr("Quality (1-100)")), 4, 0)
-        adv_grid.addWidget(self.spin_vt, 4, 1)
-        adv_grid.setColumnStretch(1, 1)
-        adv.addLayout(adv_grid)
-        for spin in (self.spin_crf, self.spin_vt):
-            spin.valueChanged.connect(self.update_quality_state)
+        preset_row.addWidget(self.combo_preset, stretch=1)
+        self.cpu_quality.layout().addLayout(preset_row)
+        self.gpu_quality, self.slider_vt, _ = self.slider_row(
+            tr("Quality"), 1, 100,
+            tr("Higher is better quality and larger files. 45-55 balanced, 60-75 almost visually lossless."))
+        adv.addWidget(self.cpu_quality)
+        adv.addWidget(self.gpu_quality)
+        for slider in (self.slider_crf, self.slider_vt):
+            slider.valueChanged.connect(self.update_quality_state)
 
-        self.cb_copy_aac = QCheckBox(tr("Keep AAC audio unchanged (lossless)"))
+        # Short labels: QCheckBox does not wrap, so long texts would widen the whole drawer.
+        self.cb_copy_aac = QCheckBox(tr("Copy AAC audio 1:1"))
+        self.cb_copy_aac.setToolTip(tr("Lossless and faster; only applies when the source already has AAC audio."))
         self.cb_copy_aac.setChecked(True)
-        self.cb_flatten = QCheckBox(tr("Put all videos directly into the target folder"))
+        self.cb_flatten = QCheckBox(tr("Don't keep subfolders"))
+        self.cb_flatten.setToolTip(tr("All videos go directly into the target folder."))
         self.cb_flatten.toggled.connect(self.schedule_scan)
         self.cb_overwrite = QCheckBox(tr("Overwrite existing results"))
+        self.cb_overwrite.setToolTip(tr("Videos that already have a result in the target folder are compressed again."))
         self.cb_overwrite.toggled.connect(self.update_run_enabled)
-        self.cb_dry_run = QCheckBox(tr("Test run: only the first second"))
+        self.cb_dry_run = QCheckBox(tr("Test run (first second only)"))
+        self.cb_dry_run.setToolTip(tr("Compresses only the first second of each video to check the settings quickly."))
         for box in (self.cb_copy_aac, self.cb_flatten, self.cb_overwrite, self.cb_dry_run):
             adv.addWidget(box)
         self.advanced.hide()
@@ -470,13 +487,15 @@ class ArchiverGUI(QWidget):
     # ------------------------------------------------------------ settings UI
     def apply_quality_preset(self, key):
         crf, vt = QUALITY_PRESETS[key]
-        self.spin_crf.setValue(crf)
-        self.spin_vt.setValue(vt)
+        self.slider_crf.setValue(crf)
+        self.slider_vt.setValue(vt)
         self.update_quality_state()
 
     def update_quality_state(self):
-        values = (self.spin_crf.value(), self.spin_vt.value())
-        active = next((k for k, v in QUALITY_PRESETS.items() if v == values), None)
+        cpu = self.combo_renderer.currentIndex() == 0
+        # A preset counts as active when the selected encoder's value matches it.
+        position, value = (0, self.slider_crf.value()) if cpu else (1, self.slider_vt.value())
+        active = next((k for k, v in QUALITY_PRESETS.items() if v[position] == value), None)
         for key, button in self.quality_buttons.items():
             button.setChecked(key == active)
         hints = {
@@ -484,11 +503,10 @@ class ArchiverGUI(QWidget):
             "archive": tr("Hardly any visible difference to the original."),
             "high": tr("Practically lossless; files stay large."),
         }
-        detail = tr("CRF {crf} · VideoToolbox {vt}", crf=values[0], vt=values[1])
+        detail = tr("CRF {value}", value=value) if cpu else tr("VideoToolbox quality {value}", value=value)
         self.quality_hint.setText(f"{hints[active]} ({detail})" if active else tr("Custom: {detail}", detail=detail))
-        cpu = self.combo_renderer.currentIndex() == 0
-        self.lbl_cpu.setText(tr("CPU (libx265)") + (tr(" · in use") if cpu else ""))
-        self.lbl_gpu.setText(tr("Mac GPU (VideoToolbox)") + ("" if cpu else tr(" · in use")))
+        self.cpu_quality.setVisible(cpu)
+        self.gpu_quality.setVisible(not cpu)
 
     def browse_folder(self, line_edit):
         folder = QFileDialog.getExistingDirectory(self, tr("Choose folder"), line_edit.text())
@@ -647,9 +665,9 @@ class ArchiverGUI(QWidget):
             'limit_fps': self.combo_fps.currentData() is not None,
             'max_fps': self.combo_fps.currentData() or 0,
             'renderer': RENDERERS[self.combo_renderer.currentIndex()],
-            'crf': self.spin_crf.value(),
+            'crf': self.slider_crf.value(),
             'preset': self.combo_preset.currentText(),
-            'vt_quality': self.spin_vt.value(),
+            'vt_quality': self.slider_vt.value(),
             'overwrite': self.cb_overwrite.isChecked(),
             'copy_aac': self.cb_copy_aac.isChecked(),
             'dry_run': self.cb_dry_run.isChecked(),
@@ -935,9 +953,9 @@ class ArchiverGUI(QWidget):
             'renderer_index': self.combo_renderer.currentIndex(),
             'max_jobs': self.spin_jobs.value(),
             'copy_aac': self.cb_copy_aac.isChecked(),
-            'crf': self.spin_crf.value(),
+            'crf': self.slider_crf.value(),
             'preset': self.combo_preset.currentText(),
-            'vt_quality': self.spin_vt.value(),
+            'vt_quality': self.slider_vt.value(),
             'flatten': self.cb_flatten.isChecked(),
             'overwrite': self.cb_overwrite.isChecked(),
             'dry_run': self.cb_dry_run.isChecked(),
@@ -977,9 +995,9 @@ class ArchiverGUI(QWidget):
         if 'renderer_index' in defaults: self.combo_renderer.setCurrentIndex(defaults['renderer_index'])
         if 'max_jobs' in defaults: self.spin_jobs.setValue(defaults['max_jobs'])
         if 'copy_aac' in defaults: self.cb_copy_aac.setChecked(defaults['copy_aac'])
-        if 'crf' in defaults: self.spin_crf.setValue(defaults['crf'])
+        if 'crf' in defaults: self.slider_crf.setValue(defaults['crf'])
         if 'preset' in defaults: self.combo_preset.setCurrentText(defaults['preset'])
-        if 'vt_quality' in defaults: self.spin_vt.setValue(defaults['vt_quality'])
+        if 'vt_quality' in defaults: self.slider_vt.setValue(defaults['vt_quality'])
         if 'flatten' in defaults: self.cb_flatten.setChecked(defaults['flatten'])
         if 'overwrite' in defaults: self.cb_overwrite.setChecked(defaults['overwrite'])
         if 'dry_run' in defaults: self.cb_dry_run.setChecked(defaults['dry_run'])

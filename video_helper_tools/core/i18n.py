@@ -58,7 +58,6 @@ GERMAN = {
     '{minutes} min': '{minutes} Min.',
     '{days} d {hours} h': '{days} T {hours} Std.',
     '{hours} h {minutes} min': '{hours} Std. {minutes} Min.',
-    'CRF {crf} · VideoToolbox {vt}': 'CRF {crf} · VideoToolbox {vt}',
     'Ready: {planned} to compress, {existing} already in the target folder.':
         'Bereit: {planned} zu komprimieren, {existing} schon im Zielordner.',
     'Log: {name}': 'Log: {name}',
@@ -76,22 +75,31 @@ GERMAN = {
     'Output is always HEVC (hvc1) with AAC audio; capture date and location are kept.':
         'Ausgaben sind immer HEVC (hvc1) mit AAC-Ton; Aufnahmedatum und Ort bleiben erhalten.',
     'Advanced': 'Erweitert',
-    'CPU (libx265)': 'CPU (libx265)',
+    'CRF': 'CRF',
     'Lower is better quality and larger files. 18-19 is visually lossless, 20-23 the sweet spot for archives.':
         'Niedriger heißt bessere Qualität und größere Dateien. 18-19 ist visuell verlustfrei, 20-23 der Sweet Spot für Archive.',
     'Slower presets give smaller files at the same quality.':
         'Langsamere Presets ergeben bei gleicher Qualität kleinere Dateien.',
-    'Mac GPU (VideoToolbox)': 'Mac-GPU (VideoToolbox)',
+    'Quality': 'Qualität',
     'Higher is better quality and larger files. 45-55 balanced, 60-75 almost visually lossless.':
         'Höher heißt bessere Qualität und größere Dateien. 45-55 ausgewogen, 60-75 fast visuell verlustfrei.',
-    'Keep AAC audio unchanged (lossless)': 'AAC-Ton unverändert übernehmen (verlustfrei)',
-    'Put all videos directly into the target folder': 'Alle Videos direkt in den Zielordner (ohne Unterordner)',
+    'Copy AAC audio 1:1': 'AAC-Ton 1:1 übernehmen',
+    'Lossless and faster; only applies when the source already has AAC audio.':
+        'Verlustfrei und schneller; greift nur, wenn die Quelle schon AAC-Ton hat.',
+    "Don't keep subfolders": 'Unterordner nicht übernehmen',
+    'All videos go directly into the target folder.': 'Alle Videos landen direkt im Zielordner.',
     'Overwrite existing results': 'Vorhandene Ergebnisse überschreiben',
-    'Test run: only the first second': 'Testlauf: nur die erste Sekunde',
+    'Videos that already have a result in the target folder are compressed again.':
+        'Videos, die schon ein Ergebnis im Zielordner haben, werden neu komprimiert.',
+    'Test run (first second only)': 'Testlauf (nur 1. Sekunde)',
+    'Compresses only the first second of each video to check the settings quickly.':
+        'Komprimiert nur die erste Sekunde jedes Videos, um die Einstellungen schnell zu prüfen.',
     'Save as default': 'Als Standard speichern',
     'Much smaller files, some visible loss of detail.': 'Deutlich kleinere Dateien, sichtbar weniger Details.',
     'Hardly any visible difference to the original.': 'Kaum sichtbarer Unterschied zum Original.',
     'Practically lossless; files stay large.': 'Praktisch verlustfrei; die Dateien bleiben groß.',
+    'CRF {value}': 'CRF {value}',
+    'VideoToolbox quality {value}': 'VideoToolbox-Qualität {value}',
     'Choose folder': 'Ordner auswählen',
     'All': 'Alle',
     'Planned': 'Geplant',
@@ -109,7 +117,6 @@ GERMAN = {
     'Size': 'Größe',
     'Savings': 'Ersparnis',
     'Free at target': 'Frei am Ziel',
-    'Quality': 'Qualität',
     'Small': 'Klein',
     'Archive': 'Archiv',
     'High': 'Hoch',
@@ -121,9 +128,7 @@ GERMAN = {
     'Frame rate': 'Bildrate',
     'Parallel videos': 'Parallele Videos',
     'Apple Photos': 'Apple Fotos',
-    'CRF (0-51)': 'CRF (0-51)',
     'Preset': 'Preset',
-    'Quality (1-100)': 'Qualität (1-100)',
     'Custom: {detail}': 'Benutzerdefiniert: {detail}',
     'Missing system dependencies': 'Fehlende System-Abhängigkeiten',
     'The following required tools were not found:\n\n{tools}':
@@ -148,7 +153,6 @@ GERMAN = {
     'Scan again': 'Neu scannen',
     'No limit': 'Nicht begrenzen',
     '{pixels} px (long side)': '{pixels} px (lange Seite)',
-    ' · in use': ' · aktiv',
     'Estimated once the first video is finished.': 'Wird geschätzt, sobald das erste Video fertig ist.',
     'Based on the videos already compressed (ratio {ratio:.0%}).':
         'Basierend auf den bereits komprimierten Videos (Verhältnis {ratio:.0%}).',
