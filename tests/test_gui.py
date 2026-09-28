@@ -192,3 +192,15 @@ def test_player_error_names_side_file_and_format(qapp, tmp_path, monkeypatch):
     dialog.reject()
     assert len(shown) == 1
     assert "komprimierte Version" in shown[0] and "broken_archived.mp4" in shown[0] and "Format:" in shown[0]
+
+
+def test_players_use_software_decoding():
+    # Qt + VideoToolbox reported "Unknown error occurred" at the end of some camera H.264 files.
+    import os
+    import subprocess
+    import sys
+
+    code = "import os, video_helper_tools; print(os.environ.get('QT_FFMPEG_DECODING_HW_DEVICE_TYPES'))"
+    env = {k: v for k, v in os.environ.items() if k != "QT_FFMPEG_DECODING_HW_DEVICE_TYPES"}
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    assert result.stdout.strip() == ","
