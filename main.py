@@ -2,8 +2,11 @@ import sys
 import os
 import json
 from pathlib import Path
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox, QMessageBox
-from PySide6.QtGui import QIcon, QFontDatabase, QFont, QPixmap
+from PySide6.QtWidgets import (
+    QApplication, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QStyle, QToolBar,
+    QVBoxLayout, QWidget,
+)
+from PySide6.QtGui import QAction, QFont, QFontDatabase, QIcon, QKeySequence, QPixmap
 from PySide6.QtCore import Qt, QSize
 
 from video_helper_tools.compressor.gui import ArchiverGUI
@@ -42,6 +45,15 @@ def saved_language(settings):
     # Older versions stored an index into ["Deutsch", "English", ...].
     legacy = {0: "de", 1: "en"}
     return legacy.get(global_settings.get('language_index'), DEFAULT_LANGUAGE)
+
+
+def tool_label(name):
+    return {
+        "compressor": tr("Compress & Archive"),
+        "sync": tr("Sync Videos"),
+        "transcriber": tr("Transcribe Audio"),
+        "rsync": tr("Backup (rsync)"),
+    }[name]
 
 
 class LandingPage(QWidget):
@@ -87,13 +99,13 @@ class LandingPage(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(40)
         btn_row.setAlignment(Qt.AlignCenter)
-        for name, label, icon in (
-            ("compressor", tr("Compress & Archive"), "tool-compressor.svg"),
-            ("sync", tr("Sync Videos"), "tool-sync.svg"),
-            ("transcriber", tr("Transcribe Audio"), "tool-transcribe.svg"),
-            ("rsync", tr("Backup (rsync)"), "tool-sync.svg"),
+        for name, icon in (
+            ("compressor", "tool-compressor.svg"),
+            ("sync", "tool-sync.svg"),
+            ("transcriber", "tool-transcribe.svg"),
+            ("rsync", "tool-sync.svg"),
         ):
-            btn_row.addWidget(self.tool_button(name, label, icon))
+            btn_row.addWidget(self.tool_button(name, tool_label(name), icon))
         layout.addLayout(btn_row)
         layout.addStretch()
 
@@ -143,15 +155,40 @@ class VideoHelperToolsSuite(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
+        self.layout.setContentsMargins(0, 0, 0, 0)  # pages bring their own margins
 
         set_language(saved_language(load_settings()))
-        self.tools = {}  # name -> (tool widget, wrapper with back button)
+        self.build_toolbar()
+        self.tools = {}  # name -> tool widget
         self.landing_page = None
         self.build_landing_page()
 
     @property
     def compressor_tab(self):
-        return self.tools.get("compressor", (None, None))[0]
+        return self.tools.get("compressor")
+
+    def build_toolbar(self):
+        # Back lives in a toolbar merged into the macOS title bar instead of its own row.
+        self.toolbar = QToolBar()
+        self.toolbar.setMovable(False)
+        self.toolbar.setFloatable(False)
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toolbar.toggleViewAction().setEnabled(False)
+        self.back_action = QAction(self.style().standardIcon(QStyle.SP_ArrowBack), "", self)
+        self.back_action.setShortcut(QKeySequence.Back)  # Cmd+[ on macOS
+        self.back_action.triggered.connect(self.show_landing)
+        self.toolbar.addAction(self.back_action)
+        self.tool_title = QLabel()
+        self.tool_title.setStyleSheet("font-weight: 600; padding-left: 8px;")
+        self.toolbar.addWidget(self.tool_title)
+        self.addToolBar(self.toolbar)
+        self.setUnifiedTitleAndToolBarOnMac(True)
+        self.retranslate_toolbar()
+
+    def retranslate_toolbar(self):
+        self.back_action.setText(tr("Back"))
+        self.back_action.setToolTip(tr("Back to the overview ({shortcut})",
+                                       shortcut=QKeySequence(QKeySequence.Back).toString(QKeySequence.NativeText)))
 
     def build_landing_page(self):
         self.landing_page = LandingPage(self.show_tool)
@@ -167,14 +204,18 @@ class VideoHelperToolsSuite(QMainWindow):
 
     def show_landing(self):
         self.clear_content()
+        self.toolbar.hide()
+        self.back_action.setEnabled(False)
         self.layout.addWidget(self.landing_page)
 
     def show_tool(self, name):
         self.clear_content()
         if name not in self.tools:
-            widget = TOOLS[name]()
-            self.tools[name] = (widget, self._wrap_with_back(widget))
-        self.layout.addWidget(self.tools[name][1])
+            self.tools[name] = TOOLS[name]()
+        self.tool_title.setText(tool_label(name))
+        self.back_action.setEnabled(True)
+        self.toolbar.show()
+        self.layout.addWidget(self.tools[name])
 
     def show_compressor(self):
         self.show_tool("compressor")
@@ -188,21 +229,8 @@ class VideoHelperToolsSuite(QMainWindow):
     def show_rsync(self):
         self.show_tool("rsync")
 
-    def _wrap_with_back(self, widget):
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        top_bar = QHBoxLayout()
-        back_btn = QPushButton(tr("← Back"))
-        back_btn.setStyleSheet("font-weight: bold; padding: 8px;")
-        back_btn.clicked.connect(self.show_landing)
-        top_bar.addWidget(back_btn)
-        top_bar.addStretch()
-        layout.addLayout(top_bar)
-        layout.addWidget(widget)
-        return container
-
     def busy_tools(self):
-        return [widget for widget, _ in self.tools.values() if getattr(widget, "is_busy", lambda: False)()]
+        return [widget for widget in self.tools.values() if getattr(widget, "is_busy", lambda: False)()]
 
     def show_about(self):
         msg = QMessageBox(self)
@@ -225,6 +253,7 @@ class VideoHelperToolsSuite(QMainWindow):
             return
 
         set_language(code)
+        self.retranslate_toolbar()
         try:
             settings = load_settings()
             settings.setdefault('global', {})['language'] = code
@@ -236,8 +265,8 @@ class VideoHelperToolsSuite(QMainWindow):
 
         # Tool pages translate their texts when built, so rebuild everything.
         self.shutdown_tools()
-        for widget, wrapper in self.tools.values():
-            wrapper.deleteLater()
+        for widget in self.tools.values():
+            widget.deleteLater()
         self.tools.clear()
         old_landing = self.landing_page
         self.build_landing_page()
@@ -259,7 +288,7 @@ class VideoHelperToolsSuite(QMainWindow):
 
     def shutdown_tools(self):
         # Embedded tool widgets never receive closeEvent, so stop their jobs/servers here.
-        for widget, _ in self.tools.values():
+        for widget in self.tools.values():
             if hasattr(widget, "shutdown"):
                 widget.shutdown()
 

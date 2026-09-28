@@ -81,7 +81,7 @@ def build_every_page(qapp, language):
     pages = [window.landing_page]
     for name in main.TOOLS:
         window.show_tool(name)
-        pages.append(window.tools[name][0])
+        pages.append(window.tools[name])
     qapp.processEvents()
     return window, pages
 

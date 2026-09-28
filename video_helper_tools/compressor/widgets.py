@@ -55,6 +55,10 @@ class ZoomableVideoView(QGraphicsView):
         self.setScene(self.scene)
         
         self.video_item = QGraphicsVideoItem()
+        # The item gets exactly the displayed aspect (see videoSizeChanged). Letting Qt fit the
+        # frame itself uses the unrotated size for rotated clips: squashed picture and
+        # never-repainted bands outside that area.
+        self.video_item.setAspectRatioMode(Qt.IgnoreAspectRatio)
         self.scene.addItem(self.video_item)
         player.setVideoOutput(self.video_item)
         

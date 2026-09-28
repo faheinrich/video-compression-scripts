@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QPointF, QRectF, Qt, QUrl
 
 from conftest import EXAMPLE_VIDEOS, requires_ffmpeg, spin
 
@@ -82,6 +82,8 @@ def test_compare_dialog_shows_rotated_clip_upright(qapp, tmp_path):
 
     # Portrait box for a portrait clip, filled edge to edge (no bars), i.e. drawn upright.
     assert rect.height() > rect.width()
+    # Qt draws into boundingRect; it must be the whole box, not a landscape area inside it.
+    assert item.boundingRect() == QRectF(QPointF(0, 0), item.size())
     assert not any(is_background(x, image.height() // 2) for x in range(3, image.width() - 3, 10))
     assert not any(is_background(image.width() // 2, y) for y in range(3, image.height() - 3, 10))
 
@@ -204,3 +206,24 @@ def test_players_use_software_decoding():
     env = {k: v for k, v in os.environ.items() if k != "QT_FFMPEG_DECODING_HW_DEVICE_TYPES"}
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert result.stdout.strip() == ","
+
+
+def test_back_lives_in_the_toolbar_and_tools_start_at_the_top(qapp):
+    import main
+
+    window = main.VideoHelperToolsSuite()
+    window.resize(1200, 800)
+    window.show()
+    qapp.processEvents()
+    assert not window.toolbar.isVisible()
+
+    window.show_tool("compressor")
+    qapp.processEvents()
+    assert window.toolbar.isVisible() and window.tool_title.text() == "Komprimieren & Archivieren"
+    # No extra back-button row or doubled margins above the tool.
+    assert window.compressor_tab.geometry().top() == 0
+
+    window.back_action.trigger()
+    qapp.processEvents()
+    assert not window.toolbar.isVisible()
+    window.close()

@@ -26,15 +26,16 @@ def tr(text, **kwargs):
 
 GERMAN = {
     # Main window / landing page
-    'About': 'Über',
-    'Choose a tool to start': 'Wähle ein Werkzeug',
-    '← Back': '← Zurück',
-    'About Video Helper Tools': 'Über Video Helper Tools',
-    '<h2>Video Helper Tools</h2><p>A suite of tools for video processing, including compression, syncing, and transcription.</p><p>Version: {version}</p>':
-        '<h2>Video Helper Tools</h2><p>Eine Sammlung von Werkzeugen für Videos: Komprimieren, Synchronisieren und Transkribieren.</p><p>Version: {version}</p>',
     'Sync Videos': 'Videos synchronisieren',
     'Transcribe Audio': 'Audio transkribieren',
     'Backup (rsync)': 'Backup (rsync)',
+    'About': 'Über',
+    'Choose a tool to start': 'Wähle ein Werkzeug',
+    'Back': 'Zurück',
+    'Back to the overview ({shortcut})': 'Zurück zur Übersicht ({shortcut})',
+    'About Video Helper Tools': 'Über Video Helper Tools',
+    '<h2>Video Helper Tools</h2><p>A suite of tools for video processing, including compression, syncing, and transcription.</p><p>Version: {version}</p>':
+        '<h2>Video Helper Tools</h2><p>Eine Sammlung von Werkzeugen für Videos: Komprimieren, Synchronisieren und Transkribieren.</p><p>Version: {version}</p>',
     'Language': 'Sprache',
     'Please stop running jobs first (compression, rsync, transcription or the local Whisper server), then change the language.':
         'Bitte beende zuerst laufende Vorgänge (Komprimierung, rsync, Transkription oder den lokalen Whisper-Server) und wechsle dann die Sprache.',
@@ -43,8 +44,8 @@ GERMAN = {
         'Es läuft noch ein Vorgang. Trotzdem beenden?\nLaufende Komprimierungen werden abgebrochen und ihre unfertigen Zieldateien gelöscht.',
 
     # Shared
-    'Language:': 'Sprache:',
     'Compress & Archive': 'Komprimieren & Archivieren',
+    'Language:': 'Sprache:',
     'Settings': 'Einstellungen',
     'Done': 'Fertig',
     'Stop': 'Stopp',
