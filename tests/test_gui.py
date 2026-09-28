@@ -1,6 +1,6 @@
 from PySide6.QtCore import QUrl
 
-from conftest import EXAMPLE_VIDEOS, spin
+from conftest import EXAMPLE_VIDEOS, requires_ffmpeg, spin
 
 
 def test_suite_opens_every_tool_and_switches_language(qapp, monkeypatch):
@@ -44,6 +44,46 @@ def test_compare_dialog_plays_both_videos(qapp):
     dialog.reject()
     assert dialog.player_orig.playbackState() == QMediaPlayer.PlaybackState.StoppedState
     assert dialog.player_orig.source().isEmpty()
+
+
+@requires_ffmpeg
+def test_compare_dialog_shows_rotated_clip_upright(qapp, tmp_path):
+    """Portrait phone clips carry a display matrix; Qt 6 applies it, the app must not rotate again."""
+    import subprocess
+    from PySide6.QtGui import QColor, QImage, QPainter
+    from video_helper_tools.compressor.widgets import CompareVideoDialog
+
+    rotated = tmp_path / "portrait.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-display_rotation", "90", "-i", str(EXAMPLE_VIDEOS[0]), "-c", "copy", str(rotated)],
+        check=True,
+    )
+
+    dialog = CompareVideoDialog(rotated, rotated)
+    dialog.show()
+    spin(2000)
+    dialog.player_orig.pause()
+
+    magenta = QColor(255, 0, 255)
+    item = dialog.view_orig.video_item
+    scene = dialog.view_orig.scene
+    scene.setBackgroundBrush(magenta)
+    rect = item.boundingRect()
+    image = QImage(int(rect.width()), int(rect.height()), QImage.Format.Format_RGB32)
+    image.fill(magenta)
+    painter = QPainter(image)
+    scene.render(painter, image.rect(), item.mapRectToScene(rect))
+    painter.end()
+    dialog.reject()
+
+    def is_background(x, y):
+        c = image.pixelColor(x, y)
+        return c.red() > 240 and c.green() < 20 and c.blue() > 240
+
+    height = image.height()
+    # Upright portrait video inside the landscape frame: empty side bars, content in the middle.
+    assert all(is_background(3, y) for y in range(0, height, 10))
+    assert not any(is_background(image.width() // 2, y) for y in range(0, height, 10))
 
 
 def test_sync_tool_volume_and_mute(qapp):

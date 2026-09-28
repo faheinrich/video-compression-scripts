@@ -17,7 +17,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget, QGraphicsVideoItem
 
 from .utils import (
     format_size, format_duration, open_in_finder, get_resolution_and_fps, 
-    get_video_rotation, get_thumbnail_path, generate_thumbnail
+    get_thumbnail_path, generate_thumbnail
 )
 from .workers import ThumbnailRunnable
 
@@ -312,13 +312,9 @@ class CompareVideoDialog(QDialog):
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.player_comp.errorOccurred.connect(self.handle_player_error)
+        # No automatic rotation here: Qt 6 already applies the file's display matrix
+        # (e.g. portrait iPhone clips); rotating again would turn them sideways.
 
-        # Apply rotation
-        rot_orig = get_video_rotation(orig_path)
-        rot_comp = get_video_rotation(comp_path)
-        self.view_orig.video_item.setRotation(rot_orig)
-        self.view_comp.video_item.setRotation(rot_comp)
-        
         comp_lbl = QLabel(f"<b>Komprimiert (Mausrad für Zoom, Klicken für Verschieben)</b><br>{comp_meta}")
         comp_lbl.setAlignment(Qt.AlignCenter)
         comp_container = QVBoxLayout()
