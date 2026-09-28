@@ -1,139 +1,72 @@
-# Video Annotation into Elan Files with Whisper
+# Video Annotation into ELAN Files with Whisper
 
-This repo contains scripts to automate the transcription of audio files
-using [OpenAI's Whisper model](https://github.com/openai/whisper).
-The result will be written into an [Elan](https://archive.mpi.nl/tla/elan) file, there it should probably be checked
-manually.
+The "Transcribe Audio" tool automates the transcription of videos using [OpenAI's Whisper model](https://github.com/openai/whisper). The result is written into an [ELAN](https://archive.mpi.nl/tla/elan) file (via [pympi](https://github.com/dopefishh/pympi)), where it should be checked and corrected manually.
 
-This is not a full-fledged transcription tool, but more of a helper to transcribe audio files using the Whisper model
-and
-writing the results into an Elan-File (using the [pympi](https://github.com/dopefishh/pympi)-package for handling elan
-files with python) for further annotation.
-It is not meant for real-time transcription, but for transcribing audio files in a batch mode (however, audio segments
-are sent sequentially, this may be impoved by parallel processing).
-For real-time transcription, look into [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT).
+This is not a full-fledged transcription tool but a helper for batch transcription. For real-time transcription, look into [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT).
 
-A [FastAPI](https://fastapi.tiangolo.com/) server is used to run the Whisper model (
-via [InsanelyFastWhisper](https://github.com/Vaibhavs10/insanely-fast-whisper)), a Client script to send
-the audio files to the server (via the [requests](https://pypi.org/project/requests/) lib) for transcription.
-A Voice Activity Detection (VAD) (using [Silero VAD](https://github.com/snakers4/silero-vad)) is used to find speech
-segments in the audio files, which are then sent to the server for transcription.
+## How it works
 
-This can be run using only a CPU, however this is (really!) painfully slow.
-The recommended way is to run the scripts on a machine with a powerful GPU, with easy access made by the FastAPI
-server. This was tested with an NVIDIA RTX 4070 TI GPU (12GB VRAM (I think)) and an RTX 5080 (16 GB VRAM) GPU, which are
-quite fast for the task. We do not have exact requirements for the GPU, but it should probably have at least 8GB of
-VRAM, depending on the Whisper model (currently `large-v3`). Quantized or distilled models can be used to reduce the
-memory with small (but
-mostly negligible) losses of quality.
+- A [FastAPI](https://fastapi.tiangolo.com/) server runs the Whisper model (via Hugging Face `transformers`, default `openai/whisper-large-v3`).
+- The client extracts the audio with `ffmpeg`, finds speech segments with [Silero VAD](https://github.com/snakers4/silero-vad), and sends each segment to the server (via [requests](https://pypi.org/project/requests/)).
+- The transcribed segments are written as annotations into an ELAN file next to the video.
 
-The server-script prints the used device for running the model, check if it says `cuda` or `cuda:0` to ensure that
-the GPU is used. If it says `cpu`, the model will run on the CPU, which is very slow and not recommended. On MacOS, the
-model can run on the Apple mps backend, however I did not test this yet, so it might not work as expected.
+Running Whisper on a CPU works but is (really!) slow. The recommended setup is a machine with a strong GPU running the server, with clients connecting over the network. It was tested with an NVIDIA RTX 4070 Ti (12 GB VRAM) and an RTX 5080 (16 GB VRAM); plan for at least 8 GB VRAM for `large-v3`. Quantized or distilled models reduce memory at a small quality cost. The server prints the device it uses: `cuda`/`cuda:0` means GPU, `cpu` means it will be slow. On macOS the Apple `mps` backend is used when available (not extensively tested).
 
-The server will run the Whisper model and the client will send the audio files to the server for transcription.
+## Installation
 
-# Installation
+`ffmpeg` must be installed on the system (`brew install ffmpeg` / `sudo apt install ffmpeg`). Python dependencies are managed with [uv](https://docs.astral.sh/uv/):
 
-To simply install requirements and run the script:
-
-```
-pip install -e .
+```bash
+uv sync
 ```
 
-To install the server requirements:
+## Run
 
-```
-pip install -e ".[server]"
-```
+### Start the server
 
-(the `-e` flag is optional, it will install the package in editable mode, so you can change the code and run it without)
-
-# Run
-
-## Start the server
-
-To run the scripts, you have to start the fastapi-whisper server first by running the command
-
-```
-run-whisper-server
+```bash
+uv run run-whisper-server
 ```
 
-This will start a server on `127.0.0.1:8080` by default, so it can only accessed by scripts running on your machine, and
-not by external machines in the network. You can change the host and port in the script.
-If you want to run the server on a different machine, you have to change the host (and optionally the port) in the
-script and run it with
+This listens on `127.0.0.1:8080` by default, so only local clients can connect. To serve other machines, bind to a reachable host:
 
-```
-run-whisper-server --url YOURHOST --port YOURPORT
+```bash
+uv run run-whisper-server --url YOURHOST --port YOURPORT
 ```
 
-## Transcribe audio files
+On Linux, `video_helper_tools/transcriber/launch_scripts/` contains a shell script and a `.desktop` entry to start the server via a desktop shortcut; adjust the `/PATH/TO/...` placeholders in the `.desktop` file.
 
-Then you can run (in a different terminal than the server if you run it locally):
+### Transcribe from the command line
 
-```
-annotate-to-elan --video_path YOURVIDEOFILE
-```
+In a second terminal:
 
-(the commands calling the entrypoints of the package are only accessible if you installed the package with `pip`)
-
-or alternatively run the python script directly
-
-```
-python whisper_server/transcribe_video_to_elan.py --video_path YOURVIDEOFILE
+```bash
+uv run annotate-to-elan --video_path YOURVIDEOFILE
 ```
 
-or if the server runs on a different machine (other than `localhost`), you can run
+If the server runs on another machine:
 
-```
-annotate-to-elan --video_path YOURVIDEOFILE --url YOURHOST --port YOURPORT
-```
-
-or alternatively
-
-```
-python whisper_server/transcribe_video_to_elan.py --video_path YOURVIDEOFILE --url YOURHOST --port YOURPORT
+```bash
+uv run annotate-to-elan --video_path YOURVIDEOFILE --url YOURHOST --port YOURPORT
 ```
 
-The port can (or should) in most cases be left as it is, so the argument can be omitted.
+The port can usually be omitted. Run `uv run annotate-to-elan --help` for VAD and padding options.
 
-```
-python transcribe_video_to_elan.py --video_path YOURVIDEOFILE --url YOURHOST --port YOURPORT
-```
+### GUI
 
-to transcribe the audio files.
+Start the suite and choose **Transcribe Audio** on the landing page:
 
-The script will transcribe the audio files and write the result into an Elan file for easy inspection and correction.
-
-## GUI
-
-Alternatively, you can use the graphical user interface for a more user-friendly experience:
-
-```
-whisper-gui
+```bash
+uv run main.py
 ```
 
-or
+The GUI lets you configure the server, start a local server, and transcribe in two modes:
+- **Single file:** select a video, see its audio waveform, and follow the transcription progress live.
+- **Batch mode:** select a folder and transcribe all videos in it sequentially, with per-file progress and quick access to the generated ELAN files.
 
-```
-python whisper_server/gui.py
-```
+![GUI Demo](gui-demo-screenshot.png)
 
-The GUI allows you to select video files, configure server settings, and visualize the transcription process. It features two modes:
-- **Single File:** Select and transcribe a single video file, visualize the audio waveform, and monitor transcription progress dynamically.
-- **Batch Mode:** Select a folder containing multiple audio/video files and transcribe them sequentially. The batch mode includes a progress tracker for the current file and allows you to easily open the folder containing the generated ELAN results.
+## Ideas
 
-![GUI Demo](whisper_server/docs/gui-demo-screenshot.png)
-
-# Additional information
-
-The `launch scripts` folder contains some scripts to run the application via a desktop shortcut. The
-`start_whisper_server.desktop` file can be copied to the desktop and will start the server when double-clicked. However,
-the paths to the executed `start_whisper_server.sh` script and desktop-icon have to be adjusted. This should be obvious
-when looking into the file.
-
-TODO: create a similar desktop-entry for the `annotate-to-elan` command.
-
-TODO: Create a docker image to run the server in a container, so it can be run on any machine with Docker (and Docker
-GPU support) installed.
+- A desktop entry for `annotate-to-elan`.
+- A Docker image for the server (with GPU support) so it runs on any machine with Docker.

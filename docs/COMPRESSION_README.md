@@ -1,92 +1,63 @@
-# Video Compression & Archiver Scripts
+# Compress & Archive
 
 <p align="center">
-  <img src="imgs/logo.png" alt="Video Archiver Logo" width="300">
+  <img src="icons/tool-compressor.png" alt="Compress & Archive" width="160">
 </p>
 
-Dieses Projekt bietet leistungsstarke Python-Skripte und eine benutzerfreundliche grafische Oberfläche (GUI) zur massenhaften Komprimierung und Archivierung von Videos. Es nutzt **FFmpeg** für hochwertige Video- und Audio-Konvertierung und **ExifTool**, um Metadaten (wie GPS, Aufnahmedatum und User-Tags) verlustfrei vom Original in die komprimierte Datei zu übertragen.
+Das Tool "Compress & Archive" der Video Helper Tools komprimiert ganze Ordner voller Videos per Batch. Es nutzt **FFmpeg** für die Video- und Audio-Konvertierung (HEVC/H.265) und **ExifTool**, um Metadaten (GPS, Aufnahmedatum, User-Tags) vom Original in die komprimierte Datei zu übertragen.
 
-## 🚀 Features
+## Features
 
-- **Grafische Benutzeroberfläche (GUI)**: Bequeme Steuerung aller Parameter über eine PyQt5-basierte Oberfläche (`video_archiver_gui.py`).
-- **Tab-System für Archivierung & Verwaltung**: 
-  - **Archivierung**: Batch-Komprimierung von Videos mit Live-Logs und Fortschrittsanzeige.
-  - **Vergleich & Verwaltung**: Vergleiche Originale und komprimierte Videos auf einen Blick. Ersetze Originale, tausche Dateien oder lösche sie direkt in der App.
-- **Integrierter Video-Player**: Spiele Original und komprimierte Version absolut synchron nebeneinander ab. Inklusive **Mausrad-Zoom** und **Verschieben (Pan)**, um Bilddetails beim Komprimieren perfekt überprüfen zu können.
-- **CLI-Unterstützung**: Schnelle und ressourcenschonende Ausführung über das Terminal (`compress_videos.py`).
-- **Apple Fotos Fix**: Ein spezielles Skript (`fix_videos_apple_fotos.py`), um Video-Codecs (hvc1-Tag) "in-place" zu korrigieren, damit sie reibungslos in Apple Fotos importiert werden können.
-- **Hardware-Beschleunigung**: Unterstützung für Apple Videotoolbox (Mac GPU) für rasend schnelle Komprimierung, alternativ hochwertiges CPU-Encoding (libx265).
-- **Intelligente Ersparnis-Berechnung**: Das Skript behält das Original, falls die komprimierte Version unerwartet größer ausfällt.
-- **Auflösungs- & Framerate-Limits**: Große 4K/60fps Videos können automatisch auf z.B. 1080p/30fps skaliert werden, um massiv Speicherplatz zu sparen.
-- **Metadaten-Erhalt**: Alle wichtigen EXIF/Metadaten-Informationen bleiben erhalten.
+- **Batch-Komprimierung** eines Quellordners (inkl. Unterordnern) in einen Zielordner, mit Live-Log und Fortschritt pro Datei sowie Gesamt-Ersparnis.
+- **Vergleich & Verwaltung in derselben Liste**: Bereits komprimierte Videos werden beim Scan erkannt und bieten direkt Aktionen an: Original durch die komprimierte Version ersetzen, beide tauschen oder eine der beiden löschen.
+- **Synchroner Side-by-Side-Player**: Original und komprimierte Version laufen nebeneinander, mit gekoppeltem **Mausrad-Zoom**, **Verschieben** und **Rotation**, um Bilddetails zu prüfen.
+- **Hardware-Beschleunigung**: Apple VideoToolbox (Mac-GPU) oder hochwertiges CPU-Encoding mit libx265 (CRF + Preset).
+- **Auflösungs- und Framerate-Limits**, z.B. 4K/60fps auf 1080p/30fps.
+- **Apple-Fotos-kompatibel**: Ausgaben werden mit dem Codec-Tag `hvc1` geschrieben und lassen sich so in Apple Fotos importieren.
+- **Sicherheitsnetz**: Wird die komprimierte Datei größer als das Original, wird zusätzlich das Original als `*_source` daneben kopiert. Bereits vorhandene Ziele (gleiche Dauer) werden übersprungen, außer "Überschreiben" ist aktiv.
+- **Dry-Run**: komprimiert nur die erste Sekunde, um Einstellungen schnell zu testen.
+- Standard-Einstellungen speichern, Log als CSV exportieren, Drag & Drop von Ordnern.
 
-## 📋 Voraussetzungen
-
-Bevor die Skripte ausgeführt werden können, müssen folgende externe Tools auf dem System installiert sein:
-
-1. **FFmpeg** (inklusive `ffprobe`)
-2. **ExifTool**
-
-**Installation unter macOS (via Homebrew):**
-```bash
-brew install ffmpeg exiftool
-```
-
-**Installation unter Ubuntu/Debian:**
-```bash
-sudo apt update
-sudo apt install ffmpeg libimage-exiftool-perl
-```
-
-**Python-Abhängigkeiten installieren:**
-Die Skripte benötigen Python 3. Einzig für die GUI wird das Paket `PyQt5` benötigt:
-```bash
-pip install PyQt5
-```
-
-## 🛠 Nutzung
-
-### 1. Die grafische Oberfläche (GUI)
-Der einfachste Weg, das Tool zu nutzen. Bietet Tab-Steuerung, Live-Logs, Fortschrittsanzeigen, bequeme Dropdowns für alle Einstellungen und einen synchronen Side-by-Side Video-Player zur Qualitätskontrolle.
+## Voraussetzungen
 
 ```bash
-python video_archiver_gui.py
+brew install ffmpeg exiftool          # macOS
+sudo apt install ffmpeg libimage-exiftool-perl   # Ubuntu/Debian
 ```
-*(Das Programm startet die Anwendung aus dem neu strukturierten `video_archiver`-Package.)*
 
-### 2. Kommandozeilen-Tool (CLI)
-Für automatisierte Abläufe oder Server ohne grafische Oberfläche. Öffne `compress_videos.py` in einem Texteditor und passe die Pfade `SRC_DIR` und `DST_DIR` sowie die gewünschten Settings im oberen Bereich an.
+Python-Abhängigkeiten werden mit [uv](https://docs.astral.sh/uv/) installiert (siehe Haupt-README):
 
 ```bash
-python compress_videos.py
+uv sync
 ```
 
-### 3. Apple Fotos Fixer
-Manche HEVC-Videos lassen sich nicht direkt in die iCloud/Apple Fotos Mediathek importieren, da der Codec-Tag nicht auf `hvc1` steht. Dieses Skript repariert das rasend schnell (nur Stream-Copy, kein Re-Encode). Passe `TARGET_DIR` im Skript an.
+## Nutzung
 
 ```bash
-python fix_videos_apple_fotos.py
+uv run main.py
 ```
 
-## 📂 Projektstruktur
+Auf der Startseite **Compress & Archive** wählen, Quell- und Zielordner setzen, **Ordner scannen**, dann **Archivierung starten**.
 
-Das Projekt wurde modular in das Python-Package `video_archiver` aufgeteilt:
-- `video_archiver_gui.py`: Einstiegspunkt für die App.
-- `video_archiver/main.py`: Start-Konfiguration der GUI.
-- `video_archiver/gui.py`: Die Haupt-UI (Tabs, Tab-Steuerung, etc.).
-- `video_archiver/widgets.py`: Alle benutzerdefinierten GUI-Komponenten (Video-Player, Listen-Elemente).
-- `video_archiver/workers.py`: Hintergrund-Prozesse (Scannen, Komprimieren) für ein flüssiges UI.
-- `video_archiver/utils.py`: Hilfsfunktionen (Formatierungen, FFprobe-Ausleser).
+Das Tool lässt sich auch einzeln starten:
 
-## 💡 Geplante / Mögliche Features
-- [x] Automatischer Dependency-Check beim Start (Prüft auf ffmpeg/exiftool)
-- [x] Drag & Drop von Ordnern in die GUI
-- [x] Option, die Ordnerstruktur beim Export flach zu klopfen (Flatten)
-- [x] Export-Funktion für Komprimierungs-Logs (CSV/TXT)
-- [x] Side-by-Side Vergleichsmodus & Player
-- [ ] Native macOS `.app` Erstellung (z.B. via PyInstaller/Py2App) zur Änderung des Namens in der Menüleiste.
+```bash
+uv run python -m video_helper_tools.compressor.main
+```
+
+## Projektstruktur
+
+`video_helper_tools/compressor/`:
+- `gui.py`: Haupt-UI des Tools (Einstellungen, Liste, Aktionen).
+- `widgets.py`: Listen-Einträge und der Vergleichs-Player.
+- `workers.py`: Hintergrund-Threads für Scannen, Komprimieren und Thumbnails.
+- `utils.py`: Hilfsfunktionen (Formatierung, ffprobe-Auswertung, Thumbnails).
+- `main.py`: Einstiegspunkt für den Einzelstart.
+
+## Mögliche Erweiterungen
+
 - [ ] Hardware-Beschleunigung für Windows/Linux (NVENC, QSV)
-
+- [ ] Speicherplatz-Prüfung vor dem Start und Restzeit-Schätzung
 
 ## License
-This project is licensed under [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/?ref=chooser-v1) [![License: CC BY-NC-SA 4.0](https://licensebuttons.net/l/by-nc-sa/4.0/80x15.png)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+This project is licensed under [`CC BY-NC-SA 4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/?ref=chooser-v1).

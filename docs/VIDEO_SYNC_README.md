@@ -1,35 +1,45 @@
 # Video Synchronization Tool
-This project uses the `ffmpeg` command line tool to extract audio from the video files, calculate the delay between them, and then apply that delay to one of the videos to synchronize them.
+
+The "Sync Videos" tool aligns two recordings of the same event (e.g. two camera angles, or a screen recording and a camera clip). It extracts the audio of both videos with `ffmpeg`, computes the offset between the audio tracks, and trims one video so both start in sync.
 
 ## Installation
-`ffmpeg` is required to run this script. 
 
-On Linux/Ubuntu, you can install it using `sudo apt install ffmpeg`.
+`ffmpeg` must be installed on the system:
 
-On macOS you can install it using `brew install ffmpeg` (using https://brew.sh/) or download it from the [FFmpeg website](https://ffmpeg.org/download.html) for other platforms.
+```bash
+brew install ffmpeg        # macOS
+sudo apt install ffmpeg    # Ubuntu/Debian
+```
 
-To install all python dependencies, run:
+Python dependencies are managed with [uv](https://docs.astral.sh/uv/) (see the main README):
 
-```pip install -r requirements.txt```
+```bash
+uv sync
+```
 
 ## Usage
-### Command Line
-Simply run the script, adjust the filepaths in the script, and it will sync the video files based on the shift in 
-their audio tracks.
 
-```python video_sync/video_sync.py```
+Start the suite and choose **Sync Videos** on the landing page:
 
-### GUI
-There is also a GUI version available for a more interactive experience. It allows you to visualize the waveforms, calculate the shift, and preview the synchronization before saving.
+```bash
+uv run main.py
+```
 
-To run the GUI:
+The GUI shows the waveforms of both videos, calculates the shift, and lets you preview both videos playing in sync (with scrubbing, volume and mute) before saving the synchronized files to a target folder.
 
-```python video_sync/gui.py```
+![GUI Demo](sync-gui-demo.png)
 
-![GUI Demo](video_sync/docs/sync-gui-demo.png)
+The sync logic can also be used from Python:
 
-Example videos are provided in the `example_videos` folder.
+```python
+from video_helper_tools.sync.video_synch import sync_videos
+sync_videos(path_to_video_1, path_to_video_2)  # pathlib.Path objects
+```
+
+This writes the synchronized videos into a `results/` folder next to the first video.
+
+Sample videos are provided in `example_resoucres/`.
 
 ## Notes
-This has been tested with two short videos, each about two minutes long, 
-further testing is needed with longer videos and longer delays, and robustness.
+
+This has been tested with short videos (about two minutes each); longer videos and larger delays need further testing.

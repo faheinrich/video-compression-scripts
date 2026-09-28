@@ -1,6 +1,6 @@
 [Desktop Entry]
 Version=1.0
-Exec=/home/USER/PATH/TO/CLONED/REPO/whisper-server/launch_scripts/start_whisper_server.sh
+Exec=/PATH/TO/video-compression-scripts/video_helper_tools/transcriber/launch_scripts/start_whisper_server.sh
 Name=Start Whisper Server
 GenericName=Whisper Server
 Comment=Start Whisper Server
@@ -8,4 +8,4 @@ Encoding=UTF-8
 Terminal=true
 Type=Application
 Categories=Application
-Icon=/home/USER/PATH/TO/CLONED/REPO/whisper-server/launch_scripts/icon.png
+Icon=/PATH/TO/video-compression-scripts/docs/transcriber-icon.png

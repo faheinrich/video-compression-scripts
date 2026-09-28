@@ -33,7 +33,7 @@ It is intended for:
 - Automatic handling of cases where the compressed file would be larger than the original
 - Support for resolution and frame-rate reduction to save storage
 - GUI with live logs, progress display, and side-by-side preview
-- Apple Photos compatibility fix for HEVC videos
+- HEVC output tagged `hvc1` so it imports into Apple Photos
 
 ### Sync Videos
 
@@ -153,16 +153,16 @@ The application is organized around a modular package named `video_helper_tools`
 - `video_helper_tools.compressor` — compression and archive workflow
 - `video_helper_tools.sync` — audio-based video synchronization workflow
 - `video_helper_tools.transcriber` — Whisper transcription and ELAN export workflow
+- `video_helper_tools.rsync_gui` — GUI wrapper around `rsync` for folder backups
+- `tests/` — headless pytest suite
 - `docs/` — standalone documentation for each tool
 - `example_resoucres/` — sample source media files
-- `example_results/` — sample output files
 
 ## Example assets
 
 The repository includes sample media and screenshots to help demonstrate the tools:
 
-- `example_resoucres/` contains example videos, audio, and ELAN files
-- `example_results/` contains example compressed outputs
+- `example_resoucres/` contains two short sample videos (also used by the tests)
 - `docs/armadillo-logo.png` is the project logo
 - `docs/gui-demo-screenshot.png` shows the transcription GUI
 - `docs/sync-gui-demo.png` shows the synchronization GUI
