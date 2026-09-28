@@ -13,7 +13,7 @@ from PySide6.QtGui import QImage
 from video_helper_tools.core.i18n import tr
 from .utils import (
     EXIFTOOL_CONFIG, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
-    parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
+    get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
 )
 
 class UnifiedScanWorker(QThread):
@@ -116,8 +116,9 @@ class ArchiveWorker(QThread):
         self.queue_lock = threading.Lock()
         self.queue = list(video_data_list)
         self.started = set()
+        self.hdr_sources = set()
 
-    def settings_record(self):
+    def settings_record(self, src_path=None):
         """What gets stored in the result file (see utils.SETTINGS_TAG)."""
         s = self.settings
         record = {
@@ -132,6 +133,8 @@ class ArchiveWorker(QThread):
             record.update(crf=s.get('crf'), preset=s.get('preset'))
         else:
             record.update(vt_quality=s.get('vt_quality'))
+        if src_path is not None and str(src_path) in self.hdr_sources:
+            record["hdr"] = True
         return record
 
     def set_queue(self, items):
@@ -262,10 +265,20 @@ class ArchiveWorker(QThread):
             if self.settings['limit_fps'] and src_fps and src_fps > self.settings['max_fps']:
                 filters.append(f"fps=fps={self.settings['max_fps']}")
             
-            filters.append("format=yuv420p")
+            # HDR stays HDR: 10-bit HEVC (Main 10) with the source's colour tags. SDR stays 8-bit.
+            hdr = get_hdr_color(src_path)
+            libx265 = self.settings['renderer'] == "libx265"
+            if hdr:
+                self.hdr_sources.add(str(src_path))
+                filters.append("format=yuv420p10le" if libx265 else "format=p010le")
+            else:
+                filters.append("format=yuv420p")
             vf_chain = ",".join(filters)
-            
+
             ffmpeg_cmd = ["ffmpeg", "-y", "-i", str(src_path), "-vf", vf_chain]
+            if hdr:
+                ffmpeg_cmd += ["-color_primaries", hdr["color_primaries"], "-color_trc", hdr["color_trc"],
+                               "-colorspace", hdr["colorspace"], "-profile:v", "main10"]
             
             if self.settings.get('dry_run', False):
                 ffmpeg_cmd += ["-t", "1"]
@@ -275,7 +288,7 @@ class ArchiveWorker(QThread):
             else:
                 ffmpeg_cmd += ["-c:a", "aac", "-b:a", "128k"]
             
-            if self.settings['renderer'] == "libx265":
+            if libx265:
                 ffmpeg_cmd += [
                     "-c:v", "libx265",
                     "-crf", str(self.settings['crf']),
@@ -323,7 +336,7 @@ class ArchiveWorker(QThread):
             subprocess.run(
                 ["exiftool", "-config", str(EXIFTOOL_CONFIG),
                  "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
-                 settings_tag_argument(self.settings_record()),
+                 settings_tag_argument(self.settings_record(src_path)),
                  str(dst_path), "-overwrite_original", "-q"], check=True)
             stat = src_path.stat()
             os.utime(dst_path, (stat.st_atime, stat.st_mtime))
@@ -341,7 +354,7 @@ class ArchiveWorker(QThread):
         ratio = (dst_size / src_size) * 100 if src_size > 0 else 100.0
 
         data_dict = {'src_size': src_size, 'dst_size': dst_size, 'diff_size': diff_size, 'ratio': ratio,
-                     'settings': None if metadata_warning else self.settings_record()}
+                     'settings': None if metadata_warning else self.settings_record(src_path)}
         result_msg = f"✅ FINISH: {src_path.name} | {format_size(src_size)} -> {format_size(dst_size)} ({ratio:.1f}%){metadata_warning}"
 
         if dst_size >= src_size:

@@ -575,3 +575,48 @@ def test_compare_is_locked_while_the_result_is_being_rewritten(archived_row):
     gui, row, _, _ = archived_row
     gui.model.update(row.src, status="running")
     assert not menu_texts(gui.build_row_menu(row))["Vergleichen"]
+
+
+def make_hlg_clip(path):
+    """Like iPhone HDR: HEVC Main 10, BT.2020, HLG."""
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(EXAMPLE_VIDEOS[0]), "-t", "2",
+         "-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le",
+         "-x265-params", "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:log-level=none",
+         "-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc",
+         "-tag:v", "hvc1", "-c:a", "aac", str(path)],
+        check=True,
+    )
+
+
+def video_format(path):
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=profile,pix_fmt,color_transfer,color_primaries", "-of", "json", str(path)],
+        capture_output=True, text=True, check=True).stdout
+    return json.loads(out)["streams"][0]
+
+
+@requires_ffmpeg
+@requires_exiftool
+@pytest.mark.parametrize("renderer_index", RENDERERS)
+def test_hdr_sources_stay_hdr(qapp, make_gui, tmp_path, renderer_index):
+    from video_helper_tools.compressor.utils import is_photos_compatible, read_compression_settings
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    make_hlg_clip(src / "hdr.mov")
+    shutil.copy(EXAMPLE_VIDEOS[0], src / "sdr.mp4")  # BT.709 (video2.mp4 is itself HLG HDR)
+
+    run_archive(qapp, make_gui(), src, dst, renderer_index=renderer_index)
+
+    hdr_out, sdr_out = dst / "hdr_archived.mp4", dst / "sdr_archived.mp4"
+    hdr_format = video_format(hdr_out)
+    assert hdr_format["profile"] == "Main 10" and hdr_format["pix_fmt"] == "yuv420p10le"
+    assert (hdr_format["color_transfer"], hdr_format["color_primaries"]) == ("arib-std-b67", "bt2020")
+    assert is_photos_compatible(hdr_out)
+    assert read_compression_settings([hdr_out])[str(hdr_out)].get("hdr") is True
+
+    sdr_format = video_format(sdr_out)
+    assert sdr_format["profile"] == "Main" and sdr_format["pix_fmt"] == "yuv420p"
+    assert "hdr" not in read_compression_settings([sdr_out])[str(sdr_out)]

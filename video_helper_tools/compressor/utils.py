@@ -105,7 +105,8 @@ def _probe(file_path):
     cmd = [
         "ffprobe", "-v", "error",
         "-show_entries",
-        "format=duration:stream=codec_type,codec_name,codec_tag_string,r_frame_rate:stream_disposition=attached_pic",
+        "format=duration:stream=codec_type,codec_name,codec_tag_string,r_frame_rate,"
+        "color_transfer,color_primaries,color_space:stream_disposition=attached_pic",
         "-of", "json", str(file_path)
     ]
     try:
@@ -247,3 +248,22 @@ def get_display_rotation(file_path):
             if "rotation" in side_data:
                 return int(round(float(side_data["rotation"]))) % 360
     return 0
+
+
+# HLG (iPhone HDR) and PQ (HDR10); everything else is treated as SDR.
+HDR_TRANSFERS = {"arib-std-b67", "smpte2084"}
+
+
+def get_hdr_color(file_path):
+    """Colour tags to carry over for HDR sources, or None for SDR."""
+    probe = _probe(file_path)
+    if probe is None or probe[1] is None:
+        return None
+    video = probe[1]
+    if video.get("color_transfer") not in HDR_TRANSFERS:
+        return None
+    return {
+        "color_trc": video["color_transfer"],
+        "color_primaries": video.get("color_primaries") or "bt2020",
+        "colorspace": video.get("color_space") or "bt2020nc",
+    }

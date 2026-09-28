@@ -51,6 +51,8 @@ def describe_settings(settings, detailed=False):
         parts = [tr("Mac GPU"), tr("quality {value}", value=settings.get('vt_quality'))]
     parts.append(f"{settings['max_res']} px" if settings.get("max_res") else tr("full resolution"))
     parts.append(f"{settings['max_fps']} fps" if settings.get("max_fps") else tr("original frame rate"))
+    if settings.get("hdr"):
+        parts.append("HDR")
     if settings.get("dry_run"):
         parts.append(tr("test run"))
     if detailed:
