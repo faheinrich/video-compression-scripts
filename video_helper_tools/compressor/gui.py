@@ -336,6 +336,8 @@ class ArchiverGUI(QWidget):
         self.table.setItemDelegateForColumn(COL_STATUS, StatusDelegate(self.table))
         self.table.selectionModel().selectionChanged.connect(self.update_detail_bar)
         header.sortIndicatorChanged.connect(self.reorder_queue)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_row_menu)
         header.setToolTip(tr("Videos are processed in this order. Click a column to change it."))
         self.table.doubleClicked.connect(self.on_row_double_clicked)
         return self.table
@@ -923,6 +925,40 @@ class ArchiverGUI(QWidget):
         indexes = self.table.selectionModel().selectedRows()
         return indexes[0].data(Qt.UserRole + 1) if indexes else None
 
+    def add_file_actions(self, menu, row):
+        """Replace/swap/delete; also offered during a run, except for the video being compressed."""
+        src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
+        editable = row.status != "running"
+        for text, action, enabled in (
+            (tr("Replace original with result…"), "overwrite", src_ok and dst_ok),
+            (tr("Swap original and result…"), "swap", src_ok and dst_ok),
+            (tr("Delete original…"), "del_orig", src_ok and dst_ok),  # only with a result to fall back on
+            (tr("Delete result…"), "del_comp", dst_ok),
+        ):
+            act = menu.addAction(text, lambda a=action: self.handle_compare_action(a, row))
+            act.setEnabled(enabled and editable)
+
+    def build_row_menu(self, row):
+        """Everything that can be done with a row; used for the right-click menu."""
+        menu = QMenu(self)
+        src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
+        if row.status == "planned":
+            menu.addAction(tr("Process next"), lambda: self.move_up(row))
+        menu.addAction(tr("Compare"), lambda: self.compare(row)).setEnabled(src_ok and dst_ok)
+        menu.addAction(tr("Show original"), lambda: open_in_finder(row.src)).setEnabled(src_ok)
+        menu.addAction(tr("Show result"), lambda: open_in_finder(row.dst)).setEnabled(dst_ok)
+        menu.addAction(tr("Log"), lambda: self.show_log(row)).setEnabled(bool(row.log))
+        menu.addSeparator()
+        self.add_file_actions(menu, row)
+        return menu
+
+    def show_row_menu(self, pos):
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        self.table.selectRow(index.row())
+        self.build_row_menu(index.data(Qt.UserRole + 1)).exec(self.table.viewport().mapToGlobal(pos))
+
     def update_detail_bar(self, *_):
         row = self.selected_row()
         while self.detail_layout.count():
@@ -954,16 +990,13 @@ class ArchiverGUI(QWidget):
             add(tr("Show result"), lambda: open_in_finder(row.dst))
         if row.log:
             add(tr("Log"), lambda: self.show_log(row))
-        if dst_ok and not self.is_archiving():
-            more = QPushButton(tr("More"))
-            menu = QMenu(more)
-            if src_ok:
-                menu.addAction(tr("Replace original with result…"), lambda: self.handle_compare_action("overwrite", row))
-                menu.addAction(tr("Swap original and result…"), lambda: self.handle_compare_action("swap", row))
-                menu.addAction(tr("Delete original…"), lambda: self.handle_compare_action("del_orig", row))
-            menu.addAction(tr("Delete result…"), lambda: self.handle_compare_action("del_comp", row))
-            more.setMenu(menu)
-            self.detail_layout.addWidget(more)
+        if dst_ok:
+            self.btn_file_actions = QPushButton(tr("File actions"))
+            menu = QMenu(self.btn_file_actions)
+            self.add_file_actions(menu, row)
+            self.btn_file_actions.setMenu(menu)
+            self.btn_file_actions.setEnabled(row.status != "running")
+            self.detail_layout.addWidget(self.btn_file_actions)
         self.detail_bar.show()
 
     def on_row_double_clicked(self, index):

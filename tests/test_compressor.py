@@ -431,3 +431,70 @@ def test_quality_guidance_is_visible_and_follows_the_value(qapp, make_gui):
     assert gui.vt_hint.isVisible() and "fast visuell verlustfrei" in gui.vt_hint.text()
     gui.slider_vt.setValue(40)
     assert "sichtbare Verluste" in gui.vt_hint.text()
+
+
+@pytest.fixture
+def archived_row(qapp, make_gui, tmp_path, monkeypatch):
+    """A GUI with one selected row whose original and result exist; confirmations answered Yes."""
+    from pathlib import Path
+    from PySide6.QtWidgets import QMessageBox
+    from video_helper_tools.compressor.model import VideoRow
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    src, dst = tmp_path / "src" / "clip.mov", tmp_path / "dst" / "clip_archived.mp4"
+    src.parent.mkdir()
+    dst.parent.mkdir()
+    src.write_bytes(b"original")
+    dst.write_bytes(b"result")
+    gui = make_gui()
+    gui.scan_items = [{'path': src, 'dst_path': dst, 'size': 8}]
+    gui.model.reset([VideoRow(src=src, dst=dst, size=8, status="exists", out_size=6)])
+    gui.table.selectRow(0)
+    return gui, gui.model.rows[0], src, dst
+
+
+def menu_texts(menu):
+    return {a.text(): a.isEnabled() for a in menu.actions() if a.text()}
+
+
+def test_file_actions_are_offered_for_archived_videos(archived_row):
+    gui, row, _, _ = archived_row
+    assert gui.btn_file_actions.isEnabled()
+    assert menu_texts(gui.btn_file_actions.menu()) == {
+        "Original durch Ergebnis ersetzen…": True, "Original und Ergebnis tauschen…": True,
+        "Original löschen…": True, "Ergebnis löschen…": True,
+    }
+    context = menu_texts(gui.build_row_menu(row))
+    assert context["Vergleichen"] and context["Original durch Ergebnis ersetzen…"]
+
+
+def test_file_actions_are_locked_only_for_the_video_being_compressed(archived_row):
+    gui, row, _, _ = archived_row
+    gui.model.update(row.src, status="running")
+    gui.update_detail_bar()
+    assert not gui.btn_file_actions.isEnabled()
+    assert not any(enabled for text, enabled in menu_texts(gui.build_row_menu(row)).items() if text.endswith("…"))
+
+
+def test_swap_original_and_result(archived_row):
+    gui, row, src, dst = archived_row
+    gui.handle_compare_action("swap", row)
+    assert (src.read_bytes(), dst.read_bytes()) == (b"result", b"original")
+
+
+def test_replace_original_with_result(archived_row):
+    gui, row, src, dst = archived_row
+    gui.handle_compare_action("overwrite", row)
+    assert not src.exists()
+    assert (src.parent / dst.name).read_bytes() == b"result"
+
+
+def test_delete_original_and_delete_result(archived_row):
+    gui, row, src, dst = archived_row
+    gui.handle_compare_action("del_comp", row)
+    assert not dst.exists() and src.exists()
+    assert gui.model.rows[0].status == "planned"  # can be compressed again
+    dst.write_bytes(b"result")
+    gui.model.update(row.src, out_size=6, status="exists")
+    gui.handle_compare_action("del_orig", row)
+    assert not src.exists() and dst.exists()
