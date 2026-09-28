@@ -551,9 +551,11 @@ class ArchiverGUI(QWidget):
         }
         detail = tr("CRF {value}", value=value) if cpu else tr("VideoToolbox quality {value}", value=value)
         self.quality_hint.setText(f"{hints[active]} ({detail})" if active else tr("Custom: {detail}", detail=detail))
-        if self.cpu_quality.isVisibleTo(self.advanced) != cpu:
-            self.cpu_quality.setVisible(cpu)
-            self.gpu_quality.setVisible(not cpu)
+        changed = (self.cpu_quality.isVisibleTo(self.advanced) != cpu
+                   or self.gpu_quality.isVisibleTo(self.advanced) == cpu)
+        self.cpu_quality.setVisible(cpu)
+        self.gpu_quality.setVisible(not cpu)
+        if changed:
             # Word-wrapped labels keep a height computed for another width after being
             # hidden; recompute so the section does not get uneven gaps.
             self.drawer_scroll.widget().layout().invalidate()
