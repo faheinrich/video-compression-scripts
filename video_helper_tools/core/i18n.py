@@ -58,8 +58,8 @@ GERMAN = {
     '{minutes} min': '{minutes} Min.',
     '{days} d {hours} h': '{days} T {hours} Std.',
     '{hours} h {minutes} min': '{hours} Std. {minutes} Min.',
-    'Ready: {planned} to compress, {existing} already in the target folder.':
-        'Bereit: {planned} zu komprimieren, {existing} schon im Zielordner.',
+    'Ready: {planned} to compress, {existing} already in the target folder. Order: as sorted in the table.':
+        'Bereit: {planned} zu komprimieren, {existing} schon im Zielordner. Reihenfolge: wie in der Tabelle sortiert.',
     'Log: {name}': 'Log: {name}',
     'Type a path, drop a folder here, or choose one.': 'Pfad eintippen, Ordner hierher ziehen oder auswählen.',
     'Choose…': 'Auswählen…',
@@ -70,6 +70,8 @@ GERMAN = {
     'More actions': 'Weitere Aktionen',
     'Export list as CSV…': 'Liste als CSV exportieren…',
     'Search files': 'Dateien suchen',
+    'Videos are processed in this order. Click a column to change it.':
+        'Die Videos werden in dieser Reihenfolge verarbeitet. Klick auf eine Spalte ändert sie.',
     'More parallel videos only help while CPU or GPU still have headroom.':
         'Mehr parallele Videos helfen nur, solange CPU bzw. GPU noch Reserven haben.',
     'Output is always HEVC (hvc1) with AAC audio; capture date and location are kept.':
@@ -143,6 +145,7 @@ GERMAN = {
         'Wähle Quell- und Zielordner, der Scan startet dann automatisch.',
     'Stopped: {done} of {total} finished.': 'Angehalten: {done} von {total} fertig.',
     'Finished: {done} videos processed.': 'Fertig: {done} Videos verarbeitet.',
+    'Process next': 'Als Nächstes',
     'Compare': 'Vergleichen',
     'Show result': 'Ergebnis zeigen',
     'Log': 'Log',
@@ -181,6 +184,7 @@ GERMAN = {
     "Really delete the compressed version '{name}'?\nThis cannot be undone!":
         "Die komprimierte Version '{name}' wirklich löschen?\nDas kann nicht rückgängig gemacht werden!",
     'result deleted': 'Ergebnis gelöscht',
+    'Planned · moved up': 'Geplant · vorgezogen',
     'Running · {percent} %': 'Läuft · {percent} %',
     'Already archived': 'Schon archiviert',
     'File': 'Datei',

@@ -312,3 +312,77 @@ def test_larger_output_does_not_copy_incompatible_original(qapp, make_gui, tmp_p
     assert outputs == ["clip_archived.mp4"]
     assert all(is_photos_compatible(p) for p in dst.iterdir())
     assert "Apple" in "\n".join(gui.model.rows[0].log)
+
+
+def make_dummy_videos(folder, sizes):
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, size in sizes.items():
+        (folder / name).write_bytes(b"x" * size)
+
+
+def queue_names(gui):
+    return [item['path'].name for item in gui.queue_items()]
+
+
+def test_processing_order_follows_table_sort_and_moved_up_videos(qapp, make_gui, tmp_path):
+    from PySide6.QtCore import Qt
+    from video_helper_tools.compressor.model import COL_FILE, COL_SIZE
+
+    make_dummy_videos(tmp_path / "src", {"a.mp4": 3, "b.mp4": 1, "c.mp4": 2})
+    gui = make_gui()
+    scan(qapp, gui, tmp_path / "src", tmp_path / "dst")
+
+    gui.table.sortByColumn(COL_SIZE, Qt.AscendingOrder)
+    assert queue_names(gui) == ["b.mp4", "c.mp4", "a.mp4"]
+    gui.table.sortByColumn(COL_FILE, Qt.DescendingOrder)
+    assert queue_names(gui) == ["c.mp4", "b.mp4", "a.mp4"]
+
+    gui.move_up(gui.model.row_for(tmp_path / "src" / "a.mp4"))
+    assert queue_names(gui) == ["a.mp4", "c.mp4", "b.mp4"]
+    gui.move_up(gui.model.row_for(tmp_path / "src" / "b.mp4"))
+    assert queue_names(gui) == ["b.mp4", "a.mp4", "c.mp4"]
+    assert gui.model.row_for(tmp_path / "src" / "a.mp4").moved_up
+
+
+def test_reordering_never_requeues_a_started_video(tmp_path):
+    from video_helper_tools.compressor.workers import ArchiveWorker
+
+    items = [{'path': tmp_path / n, 'dst_path': tmp_path / "out" / n} for n in ("a.mp4", "b.mp4", "c.mp4")]
+    worker = ArchiveWorker(tmp_path, tmp_path / "out", 1, items, {})
+    assert worker.next_item()['path'].name == "a.mp4"
+    # The GUI still sees a.mp4 as planned until its "running" status arrives.
+    worker.set_queue(list(reversed(items)))
+    assert [worker.next_item()['path'].name for _ in range(2)] == ["c.mp4", "b.mp4"]
+    assert worker.next_item() is None
+
+
+@requires_ffmpeg
+@requires_exiftool
+def test_resorting_during_a_run_changes_the_remaining_order(qapp, make_gui, tmp_path):
+    from PySide6.QtCore import Qt
+    from video_helper_tools.compressor.model import COL_FILE
+
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        shutil.copy(EXAMPLE_VIDEOS[0], src / name)
+    gui = make_gui()
+    gui.cb_dry_run.setChecked(True)
+    gui.combo_renderer.setCurrentIndex(0)
+    gui.combo_preset.setCurrentText("ultrafast")
+    gui.spin_jobs.setValue(1)
+    scan(qapp, gui, src, tmp_path / "dst")
+    gui.table.sortByColumn(COL_FILE, Qt.AscendingOrder)
+
+    started = []
+    gui.start_archiving()
+    deadline = time.monotonic() + 120
+    while gui.is_archiving() and time.monotonic() < deadline:
+        spin(20)
+        for row in gui.model.rows:
+            if row.status in ("running", "done") and row.src.name not in started:
+                started.append(row.src.name)
+                if len(started) == 1:
+                    gui.table.sortByColumn(COL_FILE, Qt.DescendingOrder)
+    assert started == ["a.mp4", "c.mp4", "b.mp4"]
+    assert {row.status for row in gui.model.rows} == {"done"}

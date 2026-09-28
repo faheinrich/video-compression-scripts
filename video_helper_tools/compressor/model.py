@@ -30,6 +30,8 @@ COL_FILE, COL_DURATION, COL_SIZE, COL_RESULT, COL_STATUS = range(5)
 def status_label(row):
     if row.status == "running":
         return tr("Running · {percent} %", percent=row.progress) + (f" · {row.speed}" if row.speed else "")
+    if row.status == "planned" and row.moved_up:
+        return tr("Planned · moved up")
     return {
         "planned": tr("Planned"),
         "done": tr("Done"),
@@ -57,6 +59,7 @@ class VideoRow:
     progress: int = 0
     speed: str = ""
     note: str = ""
+    moved_up: bool = False  # processed before the table order ("Process next")
     root: Path | None = None
     log: list = field(default_factory=list)
 
@@ -121,6 +124,17 @@ class VideoTableModel(QAbstractTableModel):
         self.thumbnails[str(path)] = pixmap
         self.dataChanged.emit(self.index(index, COL_FILE), self.index(index, COL_FILE))
 
+    @staticmethod
+    def sort_key(row, column):
+        """Shared by the table sorting and the processing order."""
+        return {
+            COL_FILE: row.src.name.lower(),
+            COL_DURATION: row.duration if row.duration is not None else -1.0,
+            COL_SIZE: row.size,
+            COL_RESULT: row.ratio if row.ratio is not None else 99.0,
+            COL_STATUS: STATUS_ORDER.index(row.status),
+        }[column]
+
     def counts(self):
         result = {}
         for row in self.rows:
@@ -148,14 +162,8 @@ class VideoTableModel(QAbstractTableModel):
             return None
         row = self.rows[index.row()]
         col = index.column()
-        if role == Qt.UserRole:  # sort key
-            return {
-                COL_FILE: row.src.name.lower(),
-                COL_DURATION: row.duration if row.duration is not None else -1.0,
-                COL_SIZE: row.size,
-                COL_RESULT: row.ratio if row.ratio is not None else 99.0,
-                COL_STATUS: STATUS_ORDER.index(row.status),
-            }[col]
+        if role == Qt.UserRole:
+            return self.sort_key(row, col)
         if role == Qt.UserRole + 1:
             return row
         if role == Qt.DisplayRole:

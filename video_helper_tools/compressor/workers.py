@@ -5,6 +5,7 @@ import time
 import signal
 import sys
 import re
+import threading
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal, QRunnable, QObject
 from PySide6.QtGui import QImage
@@ -105,18 +106,39 @@ class ArchiveWorker(QThread):
         self.src_dir = Path(src_dir)
         self.dst_dir = Path(dst_dir)
         self.max_jobs = max_jobs
-        self.video_data_list = video_data_list
         self.is_running = True
         self.settings = settings
         self.active_processes = []
-    
+        # The GUI may reorder the remaining queue while running (set_queue), hence the lock.
+        self.queue_lock = threading.Lock()
+        self.queue = list(video_data_list)
+        self.started = set()
+
+    def set_queue(self, items):
+        """Replace the videos still waiting; ones already started are never queued again."""
+        with self.queue_lock:
+            self.queue = [item for item in items if str(item['path']) not in self.started]
+
+    def next_item(self):
+        with self.queue_lock:
+            if not self.queue:
+                return None
+            item = self.queue.pop(0)
+            self.started.add(str(item['path']))
+            return item
+
+    def has_queue(self):
+        with self.queue_lock:
+            return bool(self.queue)
+
     def run(self):
-        queue = list(self.video_data_list)
         count = 0
-        
-        while (queue or self.active_processes) and self.is_running:
-            while len(self.active_processes) < self.max_jobs and queue and self.is_running:
-                file_info = queue.pop(0)
+
+        while (self.has_queue() or self.active_processes) and self.is_running:
+            while len(self.active_processes) < self.max_jobs and self.is_running:
+                file_info = self.next_item()
+                if file_info is None:
+                    break
                 src_path = file_info['path']
                 dst_path = file_info['dst_path']
                 

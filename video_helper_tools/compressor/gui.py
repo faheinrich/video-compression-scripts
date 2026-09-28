@@ -131,6 +131,7 @@ class ArchiverGUI(QWidget):
         self.log_dialog = None
         self.video_data_list = []
         self.scan_items = []
+        self.moved_up = []
         self.total_src_bytes = 0
         self.total_dst_bytes = 0
         self.run_started = None
@@ -310,6 +311,8 @@ class ArchiverGUI(QWidget):
         self.table.setItemDelegateForColumn(COL_FILE, FileDelegate(self.model, self.table))
         self.table.setItemDelegateForColumn(COL_STATUS, StatusDelegate(self.table))
         self.table.selectionModel().selectionChanged.connect(self.update_detail_bar)
+        header.sortIndicatorChanged.connect(self.reorder_queue)
+        header.setToolTip(tr("Videos are processed in this order. Click a column to change it."))
         self.table.doubleClicked.connect(self.on_row_double_clicked)
         return self.table
 
@@ -617,6 +620,7 @@ class ArchiverGUI(QWidget):
                 out_size=item['comp_size'] if exists else None,
             ))
         self.scan_items = items
+        self.moved_up = []
         self.video_data_list = [item for item in items if not item.get('exists_compressed')]
         self.model.reset(rows)
         self.detail_bar.hide()
@@ -644,9 +648,30 @@ class ArchiverGUI(QWidget):
             self.start_archiving()
 
     def queue_items(self):
+        """Videos to process, in the table's sort order with moved-up videos first."""
         # With "overwrite", videos whose result already exists are compressed again.
         wanted = {"planned", "exists"} if self.cb_overwrite.isChecked() else {"planned"}
-        return [item for item in self.scan_items if self.model.row_for(item['path']).status in wanted]
+        items = [item for item in self.scan_items if self.model.row_for(item['path']).status in wanted]
+        header = self.table.horizontalHeader()
+        column = header.sortIndicatorSection()
+        items.sort(key=lambda item: self.model.sort_key(self.model.row_for(item['path']), column),
+                   reverse=header.sortIndicatorOrder() == Qt.DescendingOrder)
+        rank = {path: i for i, path in enumerate(self.moved_up)}
+        items.sort(key=lambda item: rank.get(str(item['path']), len(rank)))  # stable: keeps table order
+        return items
+
+    def reorder_queue(self):
+        if self.is_archiving():
+            self.worker.set_queue(self.queue_items())
+
+    def move_up(self, row):
+        path = str(row.src)
+        if path in self.moved_up:
+            self.moved_up.remove(path)
+        self.moved_up.insert(0, path)
+        self.model.update(row.src, moved_up=True)
+        self.reorder_queue()
+        self.update_detail_bar()
 
     def start_archiving(self):
         if self.is_archiving() or not self.queue_items():
@@ -824,7 +849,7 @@ class ArchiverGUI(QWidget):
             base = tr("Stopped: {done} of {total} finished.", done=len(finished), total=len(run_rows)) \
                 if counts.get("planned") else tr("Finished: {done} videos processed.", done=len(finished))
             return base + (" " + tr("{count} with errors.", count=errors) if errors else "")
-        return tr("Ready: {planned} to compress, {existing} already in the target folder.",
+        return tr("Ready: {planned} to compress, {existing} already in the target folder. Order: as sorted in the table.",
                   planned=counts.get("planned", 0), existing=counts.get("exists", 0))
 
     # ------------------------------------------------------------- row detail
@@ -853,6 +878,9 @@ class ArchiverGUI(QWidget):
             return button
 
         src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
+        if row.status == "planned":
+            first = bool(self.moved_up) and self.moved_up[0] == str(row.src)
+            add(tr("Process next"), lambda: self.move_up(row), not first)
         if src_ok and dst_ok:
             add(tr("Compare"), lambda: self.compare(row))
         add(tr("Show original"), lambda: open_in_finder(row.src), src_ok)
