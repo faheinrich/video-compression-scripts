@@ -1,4 +1,4 @@
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 
 from conftest import EXAMPLE_VIDEOS, requires_ffmpeg, spin
 
@@ -68,7 +68,7 @@ def test_compare_dialog_shows_rotated_clip_upright(qapp, tmp_path):
     item = dialog.view_orig.video_item
     scene = dialog.view_orig.scene
     scene.setBackgroundBrush(magenta)
-    rect = item.boundingRect()
+    rect = dialog.view_orig.frame_rect()
     image = QImage(int(rect.width()), int(rect.height()), QImage.Format.Format_RGB32)
     image.fill(magenta)
     painter = QPainter(image)
@@ -80,10 +80,33 @@ def test_compare_dialog_shows_rotated_clip_upright(qapp, tmp_path):
         c = image.pixelColor(x, y)
         return c.red() > 240 and c.green() < 20 and c.blue() > 240
 
-    height = image.height()
-    # Upright portrait video inside the landscape frame: empty side bars, content in the middle.
-    assert all(is_background(3, y) for y in range(0, height, 10))
-    assert not any(is_background(image.width() // 2, y) for y in range(0, height, 10))
+    # Portrait box for a portrait clip, filled edge to edge (no bars), i.e. drawn upright.
+    assert rect.height() > rect.width()
+    assert not any(is_background(x, image.height() // 2) for x in range(3, image.width() - 3, 10))
+    assert not any(is_background(image.width() // 2, y) for y in range(3, image.height() - 3, 10))
+
+
+@requires_ffmpeg
+def test_rotated_clip_uses_the_full_view_height(qapp, tmp_path):
+    """Regression: a portrait 4K clip (stored landscape + rotation) was fitted as landscape and drawn tiny."""
+    import subprocess
+    from video_helper_tools.compressor.widgets import CompareVideoDialog
+
+    rotated = tmp_path / "portrait.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-display_rotation", "90", "-i", str(EXAMPLE_VIDEOS[0]), "-c", "copy", str(rotated)],
+        check=True,
+    )
+    dialog = CompareVideoDialog(rotated, EXAMPLE_VIDEOS[0])
+    dialog.setWindowState(Qt.WindowNoState)
+    dialog.resize(1600, 700)  # wide window: the case where the portrait frame was scaled wrong
+    dialog.show()
+    spin(1500)
+    view = dialog.view_orig
+    shown = view.mapFromScene(view.frame_rect()).boundingRect()
+    viewport = view.viewport().height()
+    dialog.reject()
+    assert shown.height() >= viewport * 0.95
 
 
 def test_sync_tool_volume_and_mute(qapp):

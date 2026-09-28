@@ -232,3 +232,18 @@ def describe_streams(file_path):
         elif kind:
             parts.append(f"{kind} {stream.get('codec_name') or ''}".strip())
     return " · ".join(parts)
+
+
+def get_display_rotation(file_path):
+    """Rotation from the display matrix (e.g. 90 for portrait phone clips stored landscape); 0, 90, 180 or 270."""
+    cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0",
+           "-show_entries", "stream_side_data=rotation", "-of", "json", str(file_path)]
+    try:
+        streams = json.loads(subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout).get("streams", [])
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return 0
+    for stream in streams:
+        for side_data in stream.get("side_data_list", []):
+            if "rotation" in side_data:
+                return int(round(float(side_data["rotation"]))) % 360
+    return 0

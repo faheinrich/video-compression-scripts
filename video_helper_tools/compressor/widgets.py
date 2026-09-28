@@ -2,13 +2,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QDialog, QSlider,
     QGraphicsView, QGraphicsScene, QMessageBox, QSizePolicy
 )
-from PySide6.QtCore import Qt, QUrl, QSizeF, QTimer, Signal
+from PySide6.QtCore import Qt, QPointF, QRectF, QUrl, QSizeF, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
 from video_helper_tools.core.i18n import tr
-from .utils import describe_streams, get_resolution_and_fps
+from .utils import describe_streams, get_display_rotation, get_resolution_and_fps
 
 # The compressed file decodes faster than e.g. a 4K original, so the players drift apart;
 # the original is the master clock and the compressed player is pulled back beyond this.
@@ -48,8 +48,9 @@ class DropLineEdit(QLineEdit):
 class ZoomableVideoView(QGraphicsView):
     zoom_changed = Signal(float)
 
-    def __init__(self, player, parent=None):
+    def __init__(self, player, rotation=0, parent=None):
         super().__init__(parent)
+        self.rotation = rotation
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         
@@ -67,10 +68,24 @@ class ZoomableVideoView(QGraphicsView):
         self.zoom_step = 1.15
 
     def videoSizeChanged(self, size):
+        # nativeSize is the stored (unrotated) size, but Qt draws the frame rotated by the
+        # file's display matrix; with a landscape box a portrait clip would be drawn tiny.
+        if self.rotation % 180 == 90:
+            size = QSizeF(size.height(), size.width())
         self.video_item.setSize(QSizeF(size))
-        self.setSceneRect(self.video_item.boundingRect())
-        self.fitInView(self.video_item, Qt.KeepAspectRatio)
+        self.setSceneRect(self.frame_rect())
+        self.fitInView(self.frame_rect(), Qt.KeepAspectRatio)
         self.zoom_factor = 1.0
+
+    def frame_rect(self):
+        # Not boundingRect(): for rotated clips Qt computes it from the unrotated native
+        # size, while the frame is drawn into the item's full size.
+        return QRectF(self.video_item.pos(), self.video_item.size())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if abs(self.zoom_factor - 1.0) < 0.001 and not self.video_item.size().isEmpty():
+            self.fitInView(self.frame_rect(), Qt.KeepAspectRatio)
 
     def wheelEvent(self, event):
         if event.angleDelta().y() > 0:
@@ -88,7 +103,7 @@ class ZoomableVideoView(QGraphicsView):
             self.zoom_factor = factor
 
     def reset_view(self):
-        self.fitInView(self.video_item, Qt.KeepAspectRatio)
+        self.fitInView(self.frame_rect(), Qt.KeepAspectRatio)
         self.zoom_factor = 1.0
         self.zoom_changed.emit(1.0)
 
@@ -118,7 +133,7 @@ class CompareVideoDialog(QDialog):
         self.player_orig = QMediaPlayer(self)
         self.audio_orig = QAudioOutput(self)
         self.player_orig.setAudioOutput(self.audio_orig)
-        self.view_orig = ZoomableVideoView(self.player_orig)
+        self.view_orig = ZoomableVideoView(self.player_orig, get_display_rotation(orig_path))
         self.view_orig.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.player_orig.errorOccurred.connect(self.handle_player_error)
@@ -141,7 +156,7 @@ class CompareVideoDialog(QDialog):
         self.player_comp.setAudioOutput(self.audio_comp)
         # One soundtrack: two slightly offset ones sound like an echo.
         self.audio_comp.setMuted(True)
-        self.view_comp = ZoomableVideoView(self.player_comp)
+        self.view_comp = ZoomableVideoView(self.player_comp, get_display_rotation(comp_path))
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         self.player_comp.errorOccurred.connect(self.handle_player_error)
@@ -249,7 +264,7 @@ class CompareVideoDialog(QDialog):
     def rotate_video(self, view):
         rot = view.video_item.rotation()
         # Set transform origin to center
-        rect = view.video_item.boundingRect()
+        rect = QRectF(QPointF(0, 0), view.video_item.size())
         view.video_item.setTransformOriginPoint(rect.center())
         view.video_item.setRotation(rot + 90)
     
