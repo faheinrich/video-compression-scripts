@@ -113,7 +113,7 @@ def test_language_switch_rebuilds_pages_and_is_remembered(qapp):
     assert i18n.current_language() == "en"
     assert window.tools == {}  # tool pages are rebuilt lazily in the new language
     window.show_tool("compressor")
-    assert window.compressor_tab.btn_start.text() == "🚀 Start archiving"
+    assert window.compressor_tab.btn_run.text() == "Start archiving"
     window.close()
 
     i18n.set_language("de")

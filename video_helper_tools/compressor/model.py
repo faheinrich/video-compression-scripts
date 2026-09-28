@@ -1,0 +1,323 @@
+"""Table model for the compressor queue: one row per source video."""
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSize, QSortFilterProxyModel, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette
+from PySide6.QtWidgets import QApplication, QStyle, QStyledItemDelegate
+
+from video_helper_tools.core.i18n import tr
+from .utils import format_size
+
+LOG_LIMIT = 300
+
+# Statuses in the order used when sorting by the status column.
+STATUS_ORDER = ["running", "error", "planned", "done", "skipped", "exists"]
+
+# Semantic colours; the pill background is the same hue at low alpha so it works in light and dark mode.
+STATUS_COLORS = {
+    "planned": QColor(110, 118, 134),
+    "running": QColor(58, 99, 216),
+    "done": QColor(35, 135, 90),
+    "exists": QColor(35, 135, 90),
+    "skipped": QColor(110, 118, 134),
+    "error": QColor(198, 63, 53),
+}
+
+COL_FILE, COL_DURATION, COL_SIZE, COL_RESULT, COL_STATUS = range(5)
+
+
+def status_label(row):
+    if row.status == "running":
+        return tr("Running · {percent} %", percent=row.progress) + (f" · {row.speed}" if row.speed else "")
+    return {
+        "planned": tr("Planned"),
+        "done": tr("Done"),
+        "exists": tr("Already archived"),
+        "skipped": tr("Skipped"),
+        "error": tr("Error"),
+    }[row.status]
+
+
+def format_clock(seconds):
+    seconds = int(seconds)
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+@dataclass
+class VideoRow:
+    src: Path
+    dst: Path
+    size: int
+    status: str = "planned"
+    out_size: int | None = None
+    duration: float | None = None
+    progress: int = 0
+    speed: str = ""
+    note: str = ""
+    root: Path | None = None
+    log: list = field(default_factory=list)
+
+    @property
+    def folder(self):
+        try:
+            parent = self.src.parent.relative_to(self.root)
+        except (TypeError, ValueError):  # no root, or the file lies outside it
+            return ""
+        return "" if parent == Path(".") else parent.as_posix()
+
+    @property
+    def has_result(self):
+        return self.out_size is not None and self.dst.exists()
+
+    @property
+    def ratio(self):
+        return self.out_size / self.size if self.out_size is not None and self.size else None
+
+
+class VideoTableModel(QAbstractTableModel):
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.rows = []
+        self.by_path = {}
+        self.thumbnails = {}
+
+    # --- data management -------------------------------------------------
+    def reset(self, rows):
+        self.beginResetModel()
+        self.rows = rows
+        self.by_path = {str(r.src): i for i, r in enumerate(rows)}
+        self.endResetModel()
+        self.changed.emit()
+
+    def row_for(self, path):
+        index = self.by_path.get(str(path))
+        return None if index is None else self.rows[index]
+
+    def update(self, path, **values):
+        index = self.by_path.get(str(path))
+        if index is None:
+            return
+        row = self.rows[index]
+        for key, value in values.items():
+            setattr(row, key, value)
+        self.dataChanged.emit(self.index(index, 0), self.index(index, self.columnCount() - 1))
+        self.changed.emit()
+
+    def append_log(self, path, line):
+        row = self.row_for(path)
+        if row is not None:
+            row.log.append(line)
+            del row.log[:-LOG_LIMIT]
+
+    def set_thumbnail(self, path, pixmap):
+        index = self.by_path.get(str(path))
+        if index is None or pixmap is None or pixmap.isNull():
+            return
+        self.thumbnails[str(path)] = pixmap
+        self.dataChanged.emit(self.index(index, COL_FILE), self.index(index, COL_FILE))
+
+    def counts(self):
+        result = {}
+        for row in self.rows:
+            result[row.status] = result.get(row.status, 0) + 1
+        return result
+
+    # --- Qt model API ----------------------------------------------------
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 5
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if orientation != Qt.Horizontal:
+            return None
+        if role == Qt.DisplayRole:
+            return [tr("File"), tr("Duration"), tr("Original"), tr("Result"), tr("Status")][section]
+        if role == Qt.TextAlignmentRole and section in (COL_DURATION, COL_SIZE, COL_RESULT):
+            return int(Qt.AlignRight | Qt.AlignVCenter)
+        return None
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        row = self.rows[index.row()]
+        col = index.column()
+        if role == Qt.UserRole:  # sort key
+            return {
+                COL_FILE: row.src.name.lower(),
+                COL_DURATION: row.duration if row.duration is not None else -1.0,
+                COL_SIZE: row.size,
+                COL_RESULT: row.ratio if row.ratio is not None else 99.0,
+                COL_STATUS: STATUS_ORDER.index(row.status),
+            }[col]
+        if role == Qt.UserRole + 1:
+            return row
+        if role == Qt.DisplayRole:
+            if col == COL_FILE:
+                return row.src.name
+            if col == COL_DURATION:
+                return format_clock(row.duration) if row.duration else "–"
+            if col == COL_SIZE:
+                return format_size(row.size)
+            if col == COL_RESULT:
+                if row.ratio is None:
+                    return "–"
+                change = (row.ratio - 1) * 100
+                return f"{format_size(row.out_size)}  ({change:+.0f} %)"
+            if col == COL_STATUS:
+                return status_label(row)
+        if role == Qt.TextAlignmentRole and col in (COL_DURATION, COL_SIZE, COL_RESULT):
+            return int(Qt.AlignRight | Qt.AlignVCenter)
+        if role == Qt.ForegroundRole and col == COL_RESULT and row.ratio is not None and row.ratio > 1:
+            return QColor(183, 112, 26)
+        if role == Qt.ToolTipRole:
+            if col == COL_FILE:
+                return str(row.src)
+            if row.note:
+                return row.note
+        return None
+
+
+class VideoFilterProxy(QSortFilterProxyModel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.status_filter = None
+        self.text_filter = ""
+        self.setSortRole(Qt.UserRole)
+
+    def set_status_filter(self, status):
+        self.beginFilterChange()
+        self.status_filter = status
+        self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+
+    def set_text_filter(self, text):
+        self.beginFilterChange()
+        self.text_filter = text.lower().strip()
+        self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
+
+    def filterAcceptsRow(self, source_row, source_parent):
+        row = self.sourceModel().rows[source_row]
+        if self.status_filter and row.status not in self.status_filter:
+            return False
+        if self.text_filter:
+            return self.text_filter in row.src.name.lower() or self.text_filter in row.folder.lower()
+        return True
+
+
+class FileDelegate(QStyledItemDelegate):
+    """Thumbnail, file name and sub folder in one cell."""
+
+    THUMB = QSize(48, 30)
+
+    def __init__(self, model, parent=None):
+        super().__init__(parent)
+        self.model = model
+
+    def sizeHint(self, option, index):
+        return QSize(260, 44)
+
+    def paint(self, painter, option, index):
+        row = index.data(Qt.UserRole + 1)
+        self.initStyleOption(option, index)
+        option.text = ""
+        option.icon = QIcon()
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, option, painter, option.widget)
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = option.rect.adjusted(8, 0, -8, 0)
+        thumb_rect = QRectF(rect.left(), rect.center().y() - self.THUMB.height() / 2, self.THUMB.width(), self.THUMB.height())
+        pixmap = self.model.thumbnails.get(str(row.src))
+        palette = option.palette
+        if pixmap is not None:
+            scaled = pixmap.scaled(self.THUMB, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            painter.setClipRect(thumb_rect)
+            painter.drawPixmap(thumb_rect.topLeft(), scaled)
+            painter.setClipping(False)
+        else:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(palette.color(QPalette.Mid))
+            painter.drawRoundedRect(thumb_rect, 4, 4)
+
+        selected = bool(option.state & QStyle.State_Selected)
+        text_color = palette.color(QPalette.HighlightedText if selected else QPalette.Text)
+        text_left = int(thumb_rect.right()) + 10
+        name_font = QFont(option.font)
+        name_font.setWeight(QFont.DemiBold)
+        painter.setFont(name_font)
+        painter.setPen(text_color)
+        top = option.rect.adjusted(text_left - option.rect.left(), 5, -4, 0)
+        name = painter.fontMetrics().elidedText(row.src.name, Qt.ElideMiddle, top.width())
+        folder = row.folder
+        if folder:
+            painter.drawText(top.adjusted(0, 0, 0, -option.rect.height() // 2), Qt.AlignLeft | Qt.AlignVCenter, name)
+            small = QFont(option.font)
+            small.setPointSizeF(option.font.pointSizeF() * 0.88)
+            painter.setFont(small)
+            muted = QColor(text_color)
+            muted.setAlpha(150)
+            painter.setPen(muted)
+            folder = painter.fontMetrics().elidedText(folder, Qt.ElideMiddle, top.width())
+            painter.drawText(top.adjusted(0, option.rect.height() // 2 - 5, 0, -5), Qt.AlignLeft | Qt.AlignVCenter, folder)
+        else:
+            painter.drawText(top.adjusted(0, 0, 0, -5), Qt.AlignLeft | Qt.AlignVCenter, name)
+        painter.restore()
+
+
+class StatusDelegate(QStyledItemDelegate):
+    """Status as a coloured pill; running rows get a thin progress bar underneath."""
+
+    def paint(self, painter, option, index):
+        row = index.data(Qt.UserRole + 1)
+        self.initStyleOption(option, index)
+        text = option.text
+        option.text = ""
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, option, painter, option.widget)
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = STATUS_COLORS[row.status]
+        font = QFont(option.font)
+        font.setPointSizeF(option.font.pointSizeF() * 0.92)
+        font.setWeight(QFont.DemiBold)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        # Generous padding: an exact fit gets elided through rounding.
+        width = metrics.horizontalAdvance(text) + 36
+        height = 22
+        top = option.rect.center().y() - height / 2 - (3 if row.status == "running" else 0)
+        pill = QRectF(option.rect.left() + 8, top, min(width, option.rect.width() - 16), height)
+        if option.state & QStyle.State_Selected:
+            background = option.palette.color(QPalette.Base)  # stays readable on the selection colour
+        else:
+            background = QColor(color)
+            background.setAlpha(38)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(background)
+        painter.drawRoundedRect(pill, height / 2, height / 2)
+        painter.setBrush(color)
+        painter.drawEllipse(QRectF(pill.left() + 9, pill.center().y() - 3, 6, 6))
+        painter.setPen(color)
+        painter.drawText(pill.adjusted(20, 0, -6, 0), Qt.AlignLeft | Qt.AlignVCenter,
+                         metrics.elidedText(text, Qt.ElideRight, int(pill.width()) - 24))
+        if row.status == "running":
+            track = QRectF(pill.left(), pill.bottom() + 4, pill.width(), 3)
+            faint = QColor(color)
+            faint.setAlpha(45)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(faint)
+            painter.drawRoundedRect(track, 1.5, 1.5)
+            painter.setBrush(color)
+            painter.drawRoundedRect(QRectF(track.left(), track.top(), track.width() * row.progress / 100, 3), 1.5, 1.5)
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        return QSize(190, 44)

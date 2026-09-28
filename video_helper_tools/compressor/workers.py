@@ -7,7 +7,7 @@ import sys
 import re
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal, QRunnable, QObject
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QImage
 
 from video_helper_tools.core.i18n import tr
 from .utils import get_video_info, is_photos_compatible, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
@@ -443,25 +443,49 @@ class CompareScanWorker(QThread):
         self.scan_finished.emit(pairs)
 
 class ThumbnailSignals(QObject):
-    finished = Signal(object)
+    # QImage, not QPixmap: pixmaps may only be created on the GUI thread.
+    finished = Signal(str, object)
+
 
 class ThumbnailRunnable(QRunnable):
+    """Connect `signals.finished` to a method of a long-lived QObject, never to a lambda:
+    a lambda is invoked via this short-lived signals object, which the pool may already
+    have freed when the queued call is delivered (crash in Shiboken::cppPointer)."""
+
     def __init__(self, video_path):
         super().__init__()
         self.video_path = video_path
         self.signals = ThumbnailSignals()
 
     def run(self):
+        image = None
         try:
             thumb_path = get_thumbnail_path(self.video_path)
             if not thumb_path.exists():
                 generate_thumbnail(self.video_path, thumb_path)
-
             if thumb_path.exists():
-                pixmap = QPixmap(str(thumb_path))
-                self.signals.finished.emit(pixmap)
-            else:
-                self.signals.finished.emit(None)
+                image = QImage(str(thumb_path))
         except Exception as e:
             print(f"Error generating thumbnail for {self.video_path}: {e}")
-            self.signals.finished.emit(None)
+        self.signals.finished.emit(str(self.video_path), image)
+
+
+class DurationProbeWorker(QThread):
+    """Fills in video durations after a scan so the table and ETA have them before archiving."""
+    duration_found = Signal(str, float)
+
+    def __init__(self, paths):
+        super().__init__()
+        self.paths = list(paths)
+        self._stopped = False
+
+    def stop(self):
+        self._stopped = True
+
+    def run(self):
+        for path in self.paths:
+            if self._stopped:
+                return
+            duration, _, _ = get_video_info(path)
+            if duration:
+                self.duration_found.emit(str(path), duration)

@@ -2473,7 +2473,7 @@ requires-dist = [
     { name = "opencv-python" },
     { name = "pydantic" },
     { name = "pympi-ling" },
-    { name = "pyside6", specifier = ">=6.5" },
+    { name = "pyside6", specifier = ">=6.10" },
     { name = "requests" },
     { name = "silero-vad", extras = ["onnx-cpu"] },
     { name = "torch" },
