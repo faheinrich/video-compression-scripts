@@ -153,3 +153,19 @@ def test_enter_does_not_trigger_a_dialog_button(qapp):
     dialog = open_compare_dialog(qapp, wait_ms=300)
     assert not any(b.isDefault() or b.autoDefault() for b in dialog.findChildren(QPushButton))
     dialog.reject()
+
+
+def test_player_error_names_side_file_and_format(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from video_helper_tools.compressor.widgets import CompareVideoDialog
+
+    broken = tmp_path / "broken_archived.mp4"
+    broken.write_bytes(EXAMPLE_VIDEOS[0].read_bytes()[:200_000])  # like a half-written result
+    shown = []
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda parent, title, text: shown.append(text)))
+    dialog = CompareVideoDialog(EXAMPLE_VIDEOS[0], broken)
+    dialog.show()
+    spin(3000)
+    dialog.reject()
+    assert len(shown) == 1
+    assert "komprimierte Version" in shown[0] and "broken_archived.mp4" in shown[0] and "Format:" in shown[0]

@@ -61,3 +61,17 @@ def test_get_video_info_ignores_cover_art(tmp_path):
 
 def test_get_video_info_missing_file(tmp_path):
     assert get_video_info(tmp_path / "does-not-exist.mp4") == (None, None, None)
+
+
+@requires_ffmpeg
+@pytest.mark.parametrize("seconds", [0.5, 1.02, 5])
+def test_thumbnail_is_created_for_short_and_normal_clips(tmp_path, seconds):
+    # Regression: the frame at 1 s was used unconditionally, so sub-second clips got none.
+    import subprocess
+    from video_helper_tools.compressor.utils import generate_thumbnail
+
+    clip = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(EXAMPLE_VIDEOS[0]), "-t", str(seconds), str(clip)], check=True)
+    thumb = tmp_path / "thumb.jpg"
+    assert generate_thumbnail(clip, thumb)
+    assert thumb.stat().st_size > 0

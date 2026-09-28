@@ -956,7 +956,7 @@ class ArchiverGUI(QWidget):
         src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
         if row.status == "planned":
             menu.addAction(tr("Process next"), lambda: self.move_up(row))
-        menu.addAction(tr("Compare"), lambda: self.compare(row)).setEnabled(src_ok and dst_ok)
+        menu.addAction(tr("Compare"), lambda: self.compare(row)).setEnabled(src_ok and dst_ok and row.status != "running")
         menu.addAction(tr("Show original"), lambda: open_in_finder(row.src)).setEnabled(src_ok)
         menu.addAction(tr("Show result"), lambda: open_in_finder(row.dst)).setEnabled(dst_ok)
         menu.addAction(tr("Log"), lambda: self.show_log(row)).setEnabled(bool(row.log))
@@ -995,7 +995,7 @@ class ArchiverGUI(QWidget):
         if row.status == "planned":
             first = bool(self.moved_up) and self.moved_up[0] == str(row.src)
             add(tr("Process next"), lambda: self.move_up(row), not first)
-        if src_ok and dst_ok:
+        if src_ok and dst_ok and row.status != "running":  # the result is being rewritten
             add(tr("Compare"), lambda: self.compare(row))
         add(tr("Show original"), lambda: open_in_finder(row.src), src_ok)
         if dst_ok:
@@ -1013,7 +1013,7 @@ class ArchiverGUI(QWidget):
 
     def on_row_double_clicked(self, index):
         row = index.data(Qt.UserRole + 1)
-        if row.src.exists() and row.has_result:
+        if row.src.exists() and row.has_result and row.status != "running":
             self.compare(row)
         else:
             self.show_log(row)

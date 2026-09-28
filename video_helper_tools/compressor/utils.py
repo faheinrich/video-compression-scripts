@@ -27,18 +27,19 @@ def get_thumbnail_path(video_path):
     return thumbnail_dir() / f"{video_hash}.jpg"
 
 def generate_thumbnail(video_path, output_path):
-    cmd = [
-        "ffmpeg", "-y", "-i", str(video_path),
-        "-ss", "00:00:01",
-        "-vframes", "1",
-        "-vf", "scale=100:-1",
-        str(output_path)
-    ]
-    try:
-        subprocess.run(cmd, capture_output=True, check=True)
-        return True
-    except Exception:
-        return False
+    # One second in avoids black first frames; clips shorter than that fall back to the
+    # first frame. Seeking before -i jumps to a keyframe instead of decoding up to it.
+    output_path = Path(output_path)
+    for offset in ("1", "0"):
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", offset, "-i", str(video_path),
+               "-frames:v", "1", "-vf", "scale=160:-2", str(output_path)]
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return True
+    return False
 
 def format_duration(seconds):
     if not seconds or seconds == "wird geladen...": return "⏱️ --:--"
@@ -201,3 +202,33 @@ def read_compression_settings(paths):
         except (json.JSONDecodeError, TypeError):
             continue
     return found
+
+
+def describe_streams(file_path):
+    """Short codec summary for error messages, e.g. "hevc (Main 10), 3840x2160, 59.94 fps · audio pcm_s24le"."""
+    cmd = ["ffprobe", "-v", "error", "-show_entries",
+           "stream=codec_type,codec_name,profile,width,height,r_frame_rate,pix_fmt", "-of", "json", str(file_path)]
+    try:
+        streams = json.loads(subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout).get("streams", [])
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return ""
+    parts = []
+    for stream in streams:
+        kind = stream.get("codec_type")
+        if kind == "video":
+            text = stream.get("codec_name", "?")
+            if stream.get("profile"):
+                text += f" ({stream['profile']})"
+            if stream.get("width"):
+                text += f", {stream['width']}x{stream['height']}"
+            num, _, den = stream.get("r_frame_rate", "0/0").partition("/")
+            if den and float(den) > 0:
+                text += f", {float(num) / float(den):.2f} fps"
+            if stream.get("pix_fmt"):
+                text += f", {stream['pix_fmt']}"
+            parts.append(text)
+        elif kind == "audio":
+            parts.append(f"audio {stream.get('codec_name', '?')}")
+        elif kind:
+            parts.append(f"{kind} {stream.get('codec_name') or ''}".strip())
+    return " · ".join(parts)

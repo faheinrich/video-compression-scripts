@@ -228,7 +228,12 @@ GERMAN = {
     '🔄 Reset view': '🔄 Ansicht zurücksetzen',
     'Close': 'Schließen',
     'Video error': 'Videofehler',
-    'Could not load the video: {error}': 'Video konnte nicht geladen werden: {error}',
+    'The {side} could not be played: {error}\n\nFile: {name}\nFormat: {format}':
+        'Das {side} konnte nicht abgespielt werden: {error}\n\nDatei: {name}\nFormat: {format}',
+    'original': 'Original',
+    'compressed version': 'komprimierte Version',
+    'unknown error': 'unbekannter Fehler',
+    'could not be read': 'nicht lesbar',
     '❌ Error in {name}: FFmpeg exit code {code}': '❌ Fehler bei {name}: FFmpeg-Exitcode {code}',
     ' ⚠️ (metadata could not be copied: {error})': ' ⚠️ (Metadaten konnten nicht kopiert werden: {error})',
     ' ⚠️ (original copied because it is smaller)': ' ⚠️ (Original kopiert, weil es kleiner ist)',

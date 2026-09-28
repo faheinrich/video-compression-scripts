@@ -8,7 +8,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
 from video_helper_tools.core.i18n import tr
-from .utils import get_resolution_and_fps
+from .utils import describe_streams, get_resolution_and_fps
 
 # The compressed file decodes faster than e.g. a 4K original, so the players drift apart;
 # the original is the master clock and the compressed player is pulled back beyond this.
@@ -96,6 +96,8 @@ class ZoomableVideoView(QGraphicsView):
 class CompareVideoDialog(QDialog):
     def __init__(self, orig_path, comp_path, parent=None):
         super().__init__(parent)
+        self.paths = {"orig": orig_path, "comp": comp_path}
+        self.reported_errors = set()
         self.setWindowTitle(tr("Compare: {name}", name=orig_path.name))
         
         self.setWindowState(Qt.WindowMaximized)
@@ -348,8 +350,18 @@ class CompareVideoDialog(QDialog):
         self.update_timeline()
 
     def handle_player_error(self, error, error_string=""):
-        if error != QMediaPlayer.Error.NoError:
-            QMessageBox.critical(self, tr("Video error"), tr("Could not load the video: {error}", error=error_string))
+        if error == QMediaPlayer.Error.NoError:
+            return
+        side = "orig" if self.sender() is self.player_orig else "comp"
+        if side in self.reported_errors:  # one message per side, not one per failed attempt
+            return
+        self.reported_errors.add(side)
+        path = self.paths[side]
+        QMessageBox.critical(self, tr("Video error"), tr(
+            "The {side} could not be played: {error}\n\nFile: {name}\nFormat: {format}",
+            side=tr("original") if side == "orig" else tr("compressed version"),
+            error=error_string or tr("unknown error"), name=path.name,
+            format=describe_streams(path) or tr("could not be read")))
 
     def cleanup_players(self):
         try:

@@ -569,3 +569,9 @@ def test_size_sorting_handles_files_larger_than_2_gb(qapp):
         proxy.sort(COL_SIZE, order)
         shown = [proxy.index(r, COL_SIZE).data(Qt.UserRole + 1).size for r in range(proxy.rowCount())]
         assert shown == sorted(sizes, reverse=order == Qt.DescendingOrder)
+
+
+def test_compare_is_locked_while_the_result_is_being_rewritten(archived_row):
+    gui, row, _, _ = archived_row
+    gui.model.update(row.src, status="running")
+    assert not menu_texts(gui.build_row_menu(row))["Vergleichen"]
