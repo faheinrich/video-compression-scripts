@@ -55,7 +55,17 @@ GERMAN = {
     'Select target folder': 'Zielordner auswählen',
 
     # Compress & Archive
+    'Clearly visible loss.': 'Deutlich sichtbare Verluste.',
+    'Visually lossless; files can get very large.': 'Visuell verlustfrei; Dateien können sehr groß werden.',
     '{minutes} min': '{minutes} Min.',
+    'Current: {meaning}': 'Aktuell: {meaning}',
+    'Practically lossless, very large files.': 'Praktisch verlustfrei, sehr große Dateien.',
+    'Visually lossless.': 'Visuell verlustfrei.',
+    'The sweet spot for archives.': 'Der Sweet Spot für Archive.',
+    'Smaller files, slight visible loss.': 'Kleinere Dateien, leichte sichtbare Verluste.',
+    'Small files, visible loss.': 'Kleine Dateien, sichtbare Verluste.',
+    'Good balance of size and quality.': 'Gute Balance aus Größe und Qualität.',
+    'Very high quality, almost visually lossless.': 'Sehr hohe Qualität, fast visuell verlustfrei.',
     '{days} d {hours} h': '{days} T {hours} Std.',
     '{hours} h {minutes} min': '{hours} Std. {minutes} Min.',
     'Log: {name}': 'Log: {name}',
@@ -76,13 +86,13 @@ GERMAN = {
         'Ausgaben sind immer HEVC (hvc1) mit AAC-Ton; Aufnahmedatum und Ort bleiben erhalten.',
     'Advanced': 'Erweitert',
     'CRF': 'CRF',
-    'Lower is better quality and larger files. 18-19 is visually lossless, 20-23 the sweet spot for archives.':
-        'Niedriger heißt bessere Qualität und größere Dateien. 18-19 ist visuell verlustfrei, 20-23 der Sweet Spot für Archive.',
-    'Slower presets give smaller files at the same quality.':
-        'Langsamere Presets ergeben bei gleicher Qualität kleinere Dateien.',
+    'Lower means better quality and larger files; 18-19 is visually lossless, 20-23 the sweet spot for archives.':
+        'Niedriger heißt bessere Qualität und größere Dateien; 18-19 ist visuell verlustfrei, 20-23 der Sweet Spot für Archive.',
+    'Slower presets give smaller files at the same quality but take longer.':
+        'Langsamere Presets ergeben bei gleicher Qualität kleinere Dateien, brauchen aber länger.',
     'Quality': 'Qualität',
-    'Higher is better quality and larger files. 45-55 balanced, 60-75 almost visually lossless.':
-        'Höher heißt bessere Qualität und größere Dateien. 45-55 ausgewogen, 60-75 fast visuell verlustfrei.',
+    'Higher means better quality and larger files; 45-59 is balanced, 60-79 almost visually lossless, 80+ visually lossless.':
+        'Höher heißt bessere Qualität und größere Dateien; 45-59 ist ausgewogen, 60-79 fast visuell verlustfrei, ab 80 visuell verlustfrei.',
     'Copy AAC audio 1:1': 'AAC-Ton 1:1 übernehmen',
     'Lossless and faster; only applies when the source already has AAC audio.':
         'Verlustfrei und schneller; greift nur, wenn die Quelle schon AAC-Ton hat.',

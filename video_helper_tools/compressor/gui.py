@@ -53,6 +53,30 @@ QProgressBar::chunk { background: palette(highlight); border-radius: 3px; }
 """
 
 
+def describe_crf(value):
+    """What a libx265 CRF value means for archives (lower = better quality, larger files)."""
+    if value <= 17:
+        return tr("Practically lossless, very large files.")
+    if value <= 19:
+        return tr("Visually lossless.")
+    if value <= 23:
+        return tr("The sweet spot for archives.")
+    if value <= 28:
+        return tr("Smaller files, slight visible loss.")
+    return tr("Clearly visible loss.")
+
+
+def describe_vt(value):
+    """What a VideoToolbox quality value means (higher = better quality, larger files)."""
+    if value < 45:
+        return tr("Small files, visible loss.")
+    if value < 60:
+        return tr("Good balance of size and quality.")
+    if value < 80:
+        return tr("Very high quality, almost visually lossless.")
+    return tr("Visually lossless; files can get very large.")
+
+
 def format_duration_long(seconds):
     minutes = max(1, round(seconds / 60))
     hours, minutes = divmod(minutes, 60)
@@ -316,7 +340,7 @@ class ArchiverGUI(QWidget):
         self.table.doubleClicked.connect(self.on_row_double_clicked)
         return self.table
 
-    def slider_row(self, label, minimum, maximum, tooltip):
+    def slider_row(self, label, minimum, maximum, scale, describe):
         box = QWidget()
         column = QVBoxLayout(box)
         column.setContentsMargins(0, 0, 0, 0)
@@ -325,15 +349,28 @@ class ArchiverGUI(QWidget):
         row.addWidget(QLabel(label))
         slider = QSlider(Qt.Horizontal)
         slider.setRange(minimum, maximum)
-        slider.setToolTip(tooltip)
         value = QLabel()
         value.setMinimumWidth(24)
         value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        slider.valueChanged.connect(lambda v: value.setText(str(v)))
+        # Visible guidance (a tooltip alone is easy to miss): what the current value means,
+        # then the whole scale.
+        current = QLabel()
+        current.setWordWrap(True)
+        legend = QLabel(scale)
+        legend.setProperty("role", "hint")
+        legend.setWordWrap(True)
+
+        def show(v):
+            value.setText(str(v))
+            current.setText(tr("Current: {meaning}", meaning=describe(v)))
+
+        slider.valueChanged.connect(show)
         row.addWidget(slider, stretch=1)
         row.addWidget(value)
         column.addLayout(row)
-        return box, slider, value
+        column.addWidget(current)
+        column.addWidget(legend)
+        return box, slider, current
 
     def segment(self, text, key):
         button = QPushButton(text)
@@ -441,20 +478,25 @@ class ArchiverGUI(QWidget):
         adv.setSpacing(8)
 
         # Only the controls of the selected encoder are shown (see update_quality_state).
-        self.cpu_quality, self.slider_crf, _ = self.slider_row(
+        self.cpu_quality, self.slider_crf, self.crf_hint = self.slider_row(
             tr("CRF"), 0, 51,
-            tr("Lower is better quality and larger files. 18-19 is visually lossless, 20-23 the sweet spot for archives."))
+            tr("Lower means better quality and larger files; 18-19 is visually lossless, 20-23 the sweet spot for archives."),
+            describe_crf)
         preset_row = QHBoxLayout()
         preset_row.addWidget(QLabel(tr("Preset")))
         self.combo_preset = QComboBox()
         self.combo_preset.addItems(X265_PRESETS)
         self.combo_preset.setCurrentText("slow")
-        self.combo_preset.setToolTip(tr("Slower presets give smaller files at the same quality."))
         preset_row.addWidget(self.combo_preset, stretch=1)
         self.cpu_quality.layout().addLayout(preset_row)
-        self.gpu_quality, self.slider_vt, _ = self.slider_row(
+        preset_hint = QLabel(tr("Slower presets give smaller files at the same quality but take longer."))
+        preset_hint.setProperty("role", "hint")
+        preset_hint.setWordWrap(True)
+        self.cpu_quality.layout().addWidget(preset_hint)
+        self.gpu_quality, self.slider_vt, self.vt_hint = self.slider_row(
             tr("Quality"), 1, 100,
-            tr("Higher is better quality and larger files. 45-55 balanced, 60-75 almost visually lossless."))
+            tr("Higher means better quality and larger files; 45-59 is balanced, 60-79 almost visually lossless, 80+ visually lossless."),
+            describe_vt)
         adv.addWidget(self.cpu_quality)
         adv.addWidget(self.gpu_quality)
         for slider in (self.slider_crf, self.slider_vt):
@@ -509,8 +551,12 @@ class ArchiverGUI(QWidget):
         }
         detail = tr("CRF {value}", value=value) if cpu else tr("VideoToolbox quality {value}", value=value)
         self.quality_hint.setText(f"{hints[active]} ({detail})" if active else tr("Custom: {detail}", detail=detail))
-        self.cpu_quality.setVisible(cpu)
-        self.gpu_quality.setVisible(not cpu)
+        if self.cpu_quality.isVisibleTo(self.advanced) != cpu:
+            self.cpu_quality.setVisible(cpu)
+            self.gpu_quality.setVisible(not cpu)
+            # Word-wrapped labels keep a height computed for another width after being
+            # hidden; recompute so the section does not get uneven gaps.
+            self.drawer_scroll.widget().layout().invalidate()
 
     def browse_folder(self, line_edit):
         folder = QFileDialog.getExistingDirectory(self, tr("Choose folder"), line_edit.text())

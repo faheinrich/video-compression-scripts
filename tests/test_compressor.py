@@ -413,3 +413,21 @@ def test_resorting_during_a_run_changes_the_remaining_order(qapp, make_gui, tmp_
                     gui.table.sortByColumn(COL_FILE, Qt.DescendingOrder)
     assert started == ["a.mp4", "c.mp4", "b.mp4"]
     assert {row.status for row in gui.model.rows} == {"done"}
+
+
+def test_quality_guidance_is_visible_and_follows_the_value(qapp, make_gui):
+    gui = make_gui()
+    gui.show()
+    gui.btn_advanced.setChecked(True)
+
+    gui.combo_renderer.setCurrentIndex(0)
+    gui.slider_crf.setValue(21)
+    assert gui.crf_hint.isVisible() and "Sweet Spot" in gui.crf_hint.text()
+    gui.slider_crf.setValue(18)
+    assert "Visuell verlustfrei" in gui.crf_hint.text()
+
+    gui.combo_renderer.setCurrentIndex(1)
+    gui.slider_vt.setValue(70)
+    assert gui.vt_hint.isVisible() and "fast visuell verlustfrei" in gui.vt_hint.text()
+    gui.slider_vt.setValue(40)
+    assert "sichtbare Verluste" in gui.vt_hint.text()
