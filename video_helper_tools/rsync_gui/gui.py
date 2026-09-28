@@ -1,7 +1,7 @@
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFileDialog, QProgressBar, QMessageBox
 )
-from PyQt5.QtCore import Qt, QProcess, QRegularExpression
+from PySide6.QtCore import Qt, QProcess, QRegularExpression
 import re
 import os
 
@@ -43,7 +43,7 @@ class RsyncSyncGUI(QWidget):
         layout.addWidget(info_label)
 
         # Log output
-        from PyQt5.QtWidgets import QTextEdit
+        from PySide6.QtWidgets import QTextEdit
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         layout.addWidget(self.log_output)

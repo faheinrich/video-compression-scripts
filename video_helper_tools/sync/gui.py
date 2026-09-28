@@ -5,13 +5,13 @@ import tempfile
 import librosa
 import numpy as np
 import matplotlib.pyplot as plt
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QLineEdit, QFileDialog, QSlider, QGridLayout,
                              QSizePolicy)
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtCore import Qt, QUrl, QTimer
-from PyQt5.QtGui import QPixmap, QPainter, QPen
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtCore import Qt, QUrl, QTimer
+from PySide6.QtGui import QPixmap, QPainter, QPen
 
 from video_helper_tools.sync.video_synch import extract_audio_tracks, calculate_shift_fft, trim_video
 
@@ -84,12 +84,16 @@ class VideoSyncGUI(QWidget):
         video_layout = QHBoxLayout()
         main_layout.addLayout(video_layout)
 
-        self.player1 = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        self.player1 = QMediaPlayer(self)
+        self.audio1 = QAudioOutput(self)
+        self.player1.setAudioOutput(self.audio1)
         self.video_widget1 = QVideoWidget()
         video_layout.addWidget(self.video_widget1)
         self.player1.setVideoOutput(self.video_widget1)
 
-        self.player2 = QMediaPlayer(None, QMediaPlayer.VideoSurface)
+        self.player2 = QMediaPlayer(self)
+        self.audio2 = QAudioOutput(self)
+        self.player2.setAudioOutput(self.audio2)
         self.video_widget2 = QVideoWidget()
         video_layout.addWidget(self.video_widget2)
         self.player2.setVideoOutput(self.video_widget2)
@@ -194,8 +198,8 @@ class VideoSyncGUI(QWidget):
         shutil.copy(self.vid1_path, self.tmp_vid1)
         shutil.copy(self.vid2_path, self.tmp_vid2)
 
-        self.player1.setMedia(QMediaContent(QUrl.fromLocalFile(str(self.tmp_vid1))))
-        self.player2.setMedia(QMediaContent(QUrl.fromLocalFile(str(self.tmp_vid2))))
+        self.player1.setSource(QUrl.fromLocalFile(str(self.tmp_vid1)))
+        self.player2.setSource(QUrl.fromLocalFile(str(self.tmp_vid2)))
         
         self.generate_waveforms()
         print("Videos loaded.")
@@ -354,7 +358,7 @@ class VideoSyncGUI(QWidget):
             self.scrub_slider.setRange(0, self.duration)
 
     def update_slider(self):
-        if not self.is_scrubbing and (self.player1.state() == QMediaPlayer.PlayingState or self.player2.state() == QMediaPlayer.PlayingState):
+        if not self.is_scrubbing and (self.player1.playbackState() == QMediaPlayer.PlaybackState.PlayingState or self.player2.playbackState() == QMediaPlayer.PlaybackState.PlayingState):
             # We base the slider on the "master" position (logic from play_sync)
             if self.shift > 0:
                 pos = self.player1.position() - int(self.shift * 1000)
@@ -411,19 +415,19 @@ class VideoSyncGUI(QWidget):
         self.player2.stop()
 
     def set_volume(self, val):
-        self.player1.setVolume(val)
-        self.player2.setVolume(val)
+        self.audio1.setVolume(val / 100)
+        self.audio2.setVolume(val / 100)
 
     def toggle_mute(self):
-        muted = not self.player1.isMuted()
-        self.player1.setMuted(muted)
-        self.player2.setMuted(muted)
+        muted = not self.audio1.isMuted()
+        self.audio1.setMuted(muted)
+        self.audio2.setMuted(muted)
         self.mute_btn.setText("Unmute" if muted else "Mute")
 
     def reset_all(self):
         self.stop_playback()
-        self.player1.setMedia(QMediaContent())
-        self.player2.setMedia(QMediaContent())
+        self.player1.setSource(QUrl())
+        self.player2.setSource(QUrl())
         self.vid1_edit.clear()
         self.vid2_edit.clear()
         self.target_edit.clear()
@@ -471,4 +475,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoSyncGUI()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

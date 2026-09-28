@@ -6,14 +6,14 @@ import signal
 import sys
 import re
 from pathlib import Path
-from PyQt5.QtCore import QThread, pyqtSignal, QRunnable, QObject
-from PyQt5.QtGui import QPixmap
+from PySide6.QtCore import QThread, Signal, QRunnable, QObject
+from PySide6.QtGui import QPixmap
 
 from .utils import get_video_info, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
 
 class UnifiedScanWorker(QThread):
-    file_found = pyqtSignal(dict)
-    scan_finished = pyqtSignal(list)
+    file_found = Signal(dict)
+    scan_finished = Signal(list)
     
     def __init__(self, src_dir, dst_dir, flatten=False, sort_by="name_asc"):
         super().__init__()
@@ -89,15 +89,15 @@ class UnifiedScanWorker(QThread):
 
 
 class ArchiveWorker(QThread):
-    progress_step = pyqtSignal(int, str)
+    progress_step = Signal(int, str)
 
     # Pfad-basierte Signale für eindeutige Identifizierung bei doppelten Dateinamen
-    status_update_path = pyqtSignal(str, str, str, dict)
-    file_duration_discovered_path = pyqtSignal(str, float)
-    file_progress_path = pyqtSignal(str, int)
-    ffmpeg_log_line_path = pyqtSignal(str, str)
+    status_update_path = Signal(str, str, str, dict)
+    file_duration_discovered_path = Signal(str, float)
+    file_progress_path = Signal(str, int)
+    ffmpeg_log_line_path = Signal(str, str)
     
-    finished_all = pyqtSignal()
+    finished_all = Signal()
     
     def __init__(self, src_dir, dst_dir, max_jobs, video_data_list, settings):
         super().__init__()
@@ -321,8 +321,8 @@ class ArchiveWorker(QThread):
 
 
 class CompareScanWorker(QThread):
-    pair_found = pyqtSignal(dict)
-    scan_finished = pyqtSignal(list)
+    pair_found = Signal(dict)
+    scan_finished = Signal(list)
     
     def __init__(self, orig_dir, comp_dir, sort_by="name_asc"):
         super().__init__()
@@ -436,7 +436,7 @@ class CompareScanWorker(QThread):
         self.scan_finished.emit(pairs)
 
 class ThumbnailSignals(QObject):
-    finished = pyqtSignal(object)
+    finished = Signal(object)
 
 class ThumbnailRunnable(QRunnable):
     def __init__(self, video_path):

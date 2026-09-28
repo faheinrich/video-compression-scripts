@@ -5,15 +5,15 @@ try:
 except ImportError:
     def _(text):
         return text
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, 
     QPushButton, QTextEdit, QLineEdit, QDialog, QSlider, QStyle,
     QGraphicsView, QGraphicsScene, QMessageBox
 )
-from PyQt5.QtCore import Qt, QUrl, QSizeF, pyqtSignal, QThread, QObject, QThreadPool
-from PyQt5.QtGui import QIcon, QPixmap
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtMultimediaWidgets import QVideoWidget, QGraphicsVideoItem
+from PySide6.QtCore import Qt, QUrl, QSizeF, Signal, QThread, QObject, QThreadPool
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget, QGraphicsVideoItem
 
 from .utils import (
     format_size, format_duration, open_in_finder, get_resolution_and_fps, 
@@ -214,10 +214,10 @@ class VideoItemWidget(QWidget):
             self.lbl_thumbnail.setStyleSheet("background-color: transparent; border: 1px solid #ccc;")
 
 
-from PyQt5.QtWidgets import QSizePolicy
+from PySide6.QtWidgets import QSizePolicy
 
 class ZoomableVideoView(QGraphicsView):
-    zoom_changed = pyqtSignal(float)
+    zoom_changed = Signal(float)
 
     def __init__(self, player, parent=None):
         super().__init__(parent)
@@ -284,11 +284,13 @@ class CompareVideoDialog(QDialog):
         comp_meta = f"{w_c}x{h_c} @ {fps_c} FPS" if w_c and h_c else "Unbekannt"
         
         # Original Player
-        self.player_orig = QMediaPlayer()
+        self.player_orig = QMediaPlayer(self)
+        self.audio_orig = QAudioOutput(self)
+        self.player_orig.setAudioOutput(self.audio_orig)
         self.view_orig = ZoomableVideoView(self.player_orig)
         self.view_orig.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        self.player_orig.error.connect(self.handle_player_error)
+
+        self.player_orig.errorOccurred.connect(self.handle_player_error)
 
         orig_lbl = QLabel(f"<b>Original (Mausrad für Zoom, Klicken für Verschieben)</b><br>{orig_meta}")
         orig_lbl.setAlignment(Qt.AlignCenter)
@@ -303,11 +305,13 @@ class CompareVideoDialog(QDialog):
         video_layout.addLayout(orig_container, stretch=1)
         
         # Compressed Player
-        self.player_comp = QMediaPlayer()
+        self.player_comp = QMediaPlayer(self)
+        self.audio_comp = QAudioOutput(self)
+        self.player_comp.setAudioOutput(self.audio_comp)
         self.view_comp = ZoomableVideoView(self.player_comp)
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        self.player_comp.error.connect(self.handle_player_error)
+
+        self.player_comp.errorOccurred.connect(self.handle_player_error)
 
         # Apply rotation
         rot_orig = get_video_rotation(orig_path)
@@ -365,8 +369,8 @@ class CompareVideoDialog(QDialog):
         btn_layout.addWidget(self.btn_close)
         layout.addLayout(btn_layout)
         
-        self.player_orig.setMedia(QMediaContent(QUrl.fromLocalFile(str(orig_path.resolve()))))
-        self.player_comp.setMedia(QMediaContent(QUrl.fromLocalFile(str(comp_path.resolve()))))
+        self.player_orig.setSource(QUrl.fromLocalFile(str(orig_path.resolve())))
+        self.player_comp.setSource(QUrl.fromLocalFile(str(comp_path.resolve())))
         
         self.view_orig.horizontalScrollBar().valueChanged.connect(self.view_comp.horizontalScrollBar().setValue)
         self.view_comp.horizontalScrollBar().valueChanged.connect(self.view_orig.horizontalScrollBar().setValue)
@@ -419,29 +423,26 @@ class CompareVideoDialog(QDialog):
         self.view_comp.reset_view()
 
     def toggle_play(self):
-        if self.player_orig.state() == QMediaPlayer.PlayingState:
+        if self.player_orig.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player_orig.pause()
             self.player_comp.pause()
         else:
             self.player_orig.play()
             self.player_comp.play()
-            
-    def handle_player_error(self, error):
-        if error != QMediaPlayer.NoError:
-            msg = self.sender().errorString()
-            QMessageBox.critical(self, "Video Fehler", f"Konnte Video nicht laden: {msg}")
-            
+
+    def handle_player_error(self, error, error_string=""):
+        if error != QMediaPlayer.Error.NoError:
+            QMessageBox.critical(self, "Video Fehler", f"Konnte Video nicht laden: {error_string}")
+
     def cleanup_players(self):
         for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
             if player is None:
                 continue
             try:
-                if player.state() == QMediaPlayer.PlayingState:
-                    player.pause()
                 player.stop()
-                player.setMedia(QMediaContent())
+                player.setSource(QUrl())
                 player.setVideoOutput(None)
-            except Exception:
+            except (RuntimeError, AttributeError):
                 pass
 
     def closeEvent(self, event):
@@ -457,19 +458,7 @@ class CompareVideoDialog(QDialog):
         super().accept()
 
     def __del__(self):
-        # Extra safety: destructor can help in edge cases where closeEvent
-        # was not reached for some reason.
-        try:
-            for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
-                if player is None:
-                    continue
-                if player.state() == QMediaPlayer.PlayingState:
-                    player.pause()
-                player.stop()
-                player.setMedia(QMediaContent())
-                player.setVideoOutput(None)
-        except Exception:
-            pass
+        self.cleanup_players()
 
 
 class CompareItemWidget(QWidget):

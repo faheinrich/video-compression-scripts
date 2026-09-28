@@ -1,14 +1,9 @@
-import os
-import sys
 import subprocess
 import platform
 
 def main():
     print("Starting build process for Video Helper Tools...")
-    
-    # Ensure pyinstaller is installed
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
-    
+
     separator = ";" if platform.system() == "Windows" else ":"
     
     cmd = [
@@ -18,14 +13,12 @@ def main():
         "--windowed",
         "--icon", f"docs/icons/video-helper-tools-512.png",
         "--add-data", f"docs{separator}docs",
-        "--add-data", f"settings.json{separator}.",
-        "--hidden-import", "PyQt5",
-        "--hidden-import", "PyQt5.QtCore",
-        "--hidden-import", "PyQt5.QtGui",
-        "--hidden-import", "PyQt5.QtWidgets",
+        "--hidden-import", "PySide6.QtMultimedia",
+        "--hidden-import", "PySide6.QtMultimediaWidgets",
+        # PyInstaller refuses to bundle when several Qt bindings are importable.
+        "--exclude-module", "PyQt5",
         "--hidden-import", "cv2",
         "--hidden-import", "torch",
-        "--hidden-import", "torchaudio",
         "main.py"
     ]
     

@@ -1,9 +1,9 @@
 import sys
 import os
 from pathlib import Path
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSizePolicy, QComboBox, QMessageBox
-from PyQt5.QtGui import QIcon, QFontDatabase, QFont, QPixmap
-from PyQt5.QtCore import Qt, QSize
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSizePolicy, QComboBox, QMessageBox
+from PySide6.QtGui import QIcon, QFontDatabase, QFont, QPixmap
+from PySide6.QtCore import Qt, QSize
 
 # We will need to refactor the GUIs to be QWidgets instead of QMainWindows
 # For now, let's assume we'll fix that in the next step.
@@ -116,7 +116,7 @@ class LandingPage(QWidget):
         layout.addStretch()
 
 
-from PyQt5.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox
 
 import json
 
@@ -223,12 +223,12 @@ class VideoHelperToolsSuite(QMainWindow):
         return container
         
     def show_about(self):
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle("About Video Helper Tools")
         msg.setText("<h2>Video Helper Tools</h2><p>A suite of tools for video processing, including compression, syncing, and transcription.</p><p>Version: 1.0.0</p>")
-        msg.exec_()
+        msg.exec()
 
     def change_language(self, index):
         langs = ["de", "en", "fr", "es"]
@@ -315,7 +315,7 @@ def main():
             
     window = VideoHelperToolsSuite()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()

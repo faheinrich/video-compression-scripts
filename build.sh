@@ -2,8 +2,8 @@
 
 echo "Starting build process for Video Helper Tools..."
 
-# Ensure pyinstaller is installed
-pip install pyinstaller
+# Installs runtime deps plus the dev group (pyinstaller) into .venv
+uv sync
 
 # Determine separator based on OS
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
@@ -13,19 +13,16 @@ else
 fi
 
 echo "Using PyInstaller to package the application..."
-pyinstaller --noconfirm \
+uv run pyinstaller --noconfirm \
     --name "Video Helper Tools" \
     --windowed \
     --icon "docs/icons/video-helper-tools-512.png" \
     --add-data "docs${SEP}docs" \
-    --add-data "settings.json${SEP}." \
-    --hidden-import "PyQt5" \
-    --hidden-import "PyQt5.QtCore" \
-    --hidden-import "PyQt5.QtGui" \
-    --hidden-import "PyQt5.QtWidgets" \
+    --hidden-import "PySide6.QtMultimedia" \
+    --hidden-import "PySide6.QtMultimediaWidgets" \
+    --exclude-module "PyQt5" \
     --hidden-import "cv2" \
     --hidden-import "torch" \
-    --hidden-import "torchaudio" \
     main.py
 
 echo "Build complete. Check the 'dist' directory."

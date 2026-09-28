@@ -2,21 +2,21 @@ import os
 import shutil
 import json
 from pathlib import Path
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFileDialog, QListWidget, QListWidgetItem,
     QProgressBar, QSpinBox, QGroupBox, QCheckBox, QComboBox, QSlider,
     QMessageBox
 )
-from PyQt5.QtCore import pyqtSlot, Qt, pyqtSignal
-from PyQt5.QtGui import QIcon, QPixmap
+from PySide6.QtCore import Slot, Qt, Signal
+from PySide6.QtGui import QIcon, QPixmap
 
 from video_helper_tools.compressor.utils import check_dependencies, format_size
 from video_helper_tools.compressor.widgets import DropLineEdit, VideoItemWidget, CompareItemWidget, CompareVideoDialog
 from video_helper_tools.compressor.workers import UnifiedScanWorker, ArchiveWorker
 
 class ArchiverGUI(QWidget):
-    request_back = pyqtSignal()
+    request_back = Signal()
 
     def __init__(self):
         super().__init__()
@@ -48,7 +48,7 @@ class ArchiverGUI(QWidget):
             msg.setWindowTitle("Fehlende System-Abhängigkeiten")
             msg.setText(f"Die folgenden benötigten Tools wurden nicht gefunden:\n\n{', '.join(missing)}")
             msg.setInformativeText("Bitte installiere diese Tools (z.B. via Homebrew: 'brew install ffmpeg exiftool'), damit die App funktioniert.")
-            msg.exec_()
+            msg.exec()
     
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -341,14 +341,14 @@ class ArchiverGUI(QWidget):
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle("Ratgeber: Software CRF-Qualität")
         msg.setText("<b>Der CRF-Wert bestimmt die Qualität:</b><br><br>• <b>20 - 23:</b> Optimaler Sweet-Spot für Archive.<br>• <b>18 - 19:</b> Visuell komplett verlustfrei.")
-        msg.exec_()
+        msg.exec()
     
     def show_hw_info(self):
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle("Ratgeber: Mac Hardware-Qualität")
         msg.setText("<b>Regler für Apple-Hardware-Beschleunigung (hevc_videotoolbox):</b><br><br>• <b>45 - 55:</b> Gute Balance aus Größe und Qualität (Standard: 55).<br>• <b>60 - 75:</b> Sehr hohe Qualität, fast visuell verlustfrei.<br>• <b>80 - 100:</b> Visuell verlustfrei (Dateigröße kann sehr groß werden).")
-        msg.exec_()
+        msg.exec()
     
     def browse_src(self):
         self.browse_folder(self.txt_src)
@@ -397,7 +397,7 @@ class ArchiverGUI(QWidget):
         self.scan_worker.scan_finished.connect(self.on_unified_scan_finished)
         self.scan_worker.start()
     
-    @pyqtSlot(dict)
+    @Slot(dict)
     def on_unified_file_found(self, file_info):
         filepath = str(file_info['path'])
         index = self.list_status.count() + 1
@@ -439,7 +439,7 @@ class ArchiverGUI(QWidget):
             except Exception:
                 pass
     
-    @pyqtSlot(list)
+    @Slot(list)
     def on_unified_scan_finished(self, full_list):
         self.btn_scan.setEnabled(True)
         self.btn_start.setEnabled(len(self.video_data_list) > 0)
@@ -502,12 +502,12 @@ class ArchiverGUI(QWidget):
             item.setSizeHint(widget.sizeHint() if is_visible else widget.minimumSizeHint())
             self.list_status.doItemsLayout()
     
-    @pyqtSlot(int, str)
+    @Slot(int, str)
     def on_progress_step(self, count, message):
         self.progress_bar.setValue(count)
         self.lbl_global_progress.setText(f"Gesamtfortschritt: {count} / {self.progress_bar.maximum()}")
     
-    @pyqtSlot(str, float)
+    @Slot(str, float)
     def on_file_duration_discovered(self, filepath, duration):
         if filepath in self.widget_mapping: self.widget_mapping[filepath].update_duration(duration)
     
@@ -529,7 +529,7 @@ class ArchiverGUI(QWidget):
         else:
             self.lbl_global_savings.setStyleSheet("font-weight: bold; color: #c0392b; margin-top: 2px; margin-bottom: 5px;")
 
-    @pyqtSlot(str, str, str, dict)
+    @Slot(str, str, str, dict)
     def on_status_update(self, filepath, status, reason, data_dict):
         if filepath in self.widget_mapping:
             widget = self.widget_mapping[filepath]
@@ -563,21 +563,21 @@ class ArchiverGUI(QWidget):
                             self.widget_mapping[filepath] = new_widget
                             break
     
-    @pyqtSlot(str, int)
+    @Slot(str, int)
     def on_file_progress(self, path, percentage):
         if path in self.widget_mapping:
             widget = self.widget_mapping[path]
             if hasattr(widget, 'set_progress'):
                 widget.set_progress(percentage)
     
-    @pyqtSlot(str, str)
+    @Slot(str, str)
     def on_ffmpeg_log_line(self, path, log_line):
         if path in self.widget_mapping:
             widget = self.widget_mapping[path]
             if hasattr(widget, 'append_log'):
                 widget.append_log(log_line)
 
-    @pyqtSlot()
+    @Slot()
     def on_finished_all(self):
         self.btn_scan.setEnabled(True)
         self.btn_stop.setEnabled(False)
@@ -587,8 +587,7 @@ class ArchiverGUI(QWidget):
         self.btn_export.setEnabled(True)
 
     def export_logs(self):
-        options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Log exportieren", "compression_log.csv", "CSV Files (*.csv);;All Files (*)", options=options)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Log exportieren", "compression_log.csv", "CSV Files (*.csv);;All Files (*)")
         if file_path:
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
@@ -612,7 +611,7 @@ class ArchiverGUI(QWidget):
         
         if action == "play":
             dialog = CompareVideoDialog(orig_path, comp_path, self)
-            dialog.exec_()
+            dialog.exec()
             
         elif action == "overwrite":
             reply = QMessageBox.question(self, "Überschreiben", f"Möchtest du das Original '{orig_path.name}' wirklich mit der komprimierten Version überschreiben?", QMessageBox.Yes | QMessageBox.No)

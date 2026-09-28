@@ -54,3 +54,6 @@ settings.json
 
 # Generated thumbnail cache
 thumbnails/
+
+# uv virtual environment
+.venv/

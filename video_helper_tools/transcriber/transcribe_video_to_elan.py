@@ -3,12 +3,11 @@ import numpy as np
 import librosa
 import pympi
 import requests
-from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
 from pathlib import Path
 
 import tqdm
 
-from .run_minimal_whisper_server import DEFAULT_SERVER_PORT, TranscriptionRequest, DEFAULT_SERVER_URL
+from .protocol import DEFAULT_SERVER_PORT, TranscriptionRequest, DEFAULT_SERVER_URL
 from . import WHISPER_SERVER_ROOT_DIR
 
 whisper_transcription_padding_length_ms = 200
@@ -70,7 +69,7 @@ def transcribe_video(video_file_path: 'Path' or str, server_url: str, server_por
             "ffmpeg", "-i", str(video_file_path), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(audio_path)
         ], check=False)
     
-    # load audio signal again, with librosa. Maybe can be done with read_audio from silero...?
+    # Load as 16 kHz mono float32; reused for both VAD and the Whisper requests.
     audio_signal, sample_rate = librosa.load(audio_path, sr=16000)
     print(
         f"DEBUG: Loaded audio {audio_path}. dtype: {audio_signal.dtype}, shape: {audio_signal.shape}, sample_rate: {sample_rate}")
@@ -93,9 +92,13 @@ def transcribe_video(video_file_path: 'Path' or str, server_url: str, server_por
     )
     eaf.add_tier(tier_id=tier_name, ling=tier_name)
     
-    # Voice Activity Detection (VAD)
+    # Voice Activity Detection (VAD). Imported lazily: torch takes seconds to load.
+    import torch
+    from silero_vad import load_silero_vad, get_speech_timestamps
     silero_vad_model = load_silero_vad(onnx=True)
-    wav = read_audio(str(audio_path))  # backend (sox, soundfile, or ffmpeg) required!
+    # librosa already yields 16 kHz mono float32, which is what silero expects;
+    # this avoids silero's read_audio and its torchaudio/torchcodec dependency.
+    wav = torch.from_numpy(audio_signal)
     
     if progress_callback:
         progress_callback(-1, -1, "Detecting speech segments with VAD...")

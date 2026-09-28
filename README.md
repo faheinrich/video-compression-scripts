@@ -11,7 +11,7 @@ It combines three workflows into one project:
 - **Sync Videos** — align two recordings using their audio tracks.
 - **Transcribe Audio** — generate ELAN annotations from speech using Whisper and VAD.
 
-The main entry point is a PyQt5 application that exposes all three tools in a single tabbed interface.
+The main entry point is a PySide6 (Qt 6) application that exposes all tools from a single landing page.
 
 ## Overview
 
@@ -54,11 +54,13 @@ It is intended for:
 
 ### Python dependencies
 
-Install the Python packages required by the suite:
+The project is managed with [uv](https://docs.astral.sh/uv/). Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`; the Python version is pinned in `.python-version`.
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
+
+This creates `.venv` with the exact locked versions (including PyInstaller from the `dev` group).
 
 ### External dependencies
 
@@ -83,8 +85,15 @@ sudo apt install ffmpeg libimage-exiftool-perl
 Start the combined desktop application with:
 
 ```bash
-python main.py
+uv run main.py
 ```
+
+This opens a PySide6 (Qt 6) window with a landing page for:
+
+- Compress & Archive
+- Sync Videos
+- Transcribe Audio
+- Backup (Rsync)
 
 ## Building a Standalone Application
 
@@ -97,16 +106,10 @@ To build the app, run the included script:
 ./build.sh
 
 # Windows (or cross-platform)
-python build.py
+uv run python build.py
 ```
 
 The bundled executable will be created in the `dist` directory. Please note that because of dependencies like PyTorch and OpenCV, the resulting application bundle will be large.
-
-This launches the PyQt5 window with tabs for:
-
-- Compress & Archive
-- Sync Videos
-- Transcribe Audio
 
 ## Transcription workflow
 
@@ -116,25 +119,23 @@ The transcription workflow uses a client/server setup:
 2. Run the transcription client against a file or folder.
 3. Review and correct the generated ELAN output if needed.
 
-Typical commands from the docs include:
+Both steps are installed as commands by `uv sync`:
 
 ```bash
-run-whisper-server
+uv run run-whisper-server
 ```
 
 and then:
 
 ```bash
-annotate-to-elan --video_path YOURVIDEOFILE
+uv run annotate-to-elan --video_path YOURVIDEOFILE
 ```
 
 If you need to point the client to a different host:
 
 ```bash
-annotate-to-elan --video_path YOURVIDEOFILE --url YOURHOST --port YOURPORT
+uv run annotate-to-elan --video_path YOURVIDEOFILE --url YOURHOST --port YOURPORT
 ```
-
-You can also run the scripts directly if preferred.
 
 ## Project structure
 
@@ -160,18 +161,7 @@ The repository includes sample media and screenshots to help demonstrate the too
 
 ## Requirements
 
-The current Python dependency list includes:
-
-- `PyQt5`
-- `FFmpeg` tooling through your system installation
-- `numpy`, `librosa`, `matplotlib`
-- `pympi-ling`
-- `requests`
-- `silero_vad`
-- `torch`, `torchaudio`
-- `fastapi`, `uvicorn`, `transformers`
-- `opencv-python`
-- `PyQtChart`, `i18n`, `onnxruntime`
+Python dependencies are declared in `pyproject.toml` (GUI: `PySide6`; audio/video: `numpy`, `librosa`, `matplotlib`, `opencv-python`; transcription: `torch`, `silero-vad`, `transformers`, `fastapi`, `uvicorn`, `pympi-ling`). FFmpeg, ffprobe and ExifTool come from your system installation (see above).
 
 ## Roadmap
 

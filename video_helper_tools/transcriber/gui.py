@@ -8,23 +8,23 @@ import json
 import threading
 import cv2
 import numpy as np
-from PyQt5.QtGui import QIcon, QImage, QPixmap, QPainter, QPen, QColor, QPalette
+from PySide6.QtGui import QIcon, QImage, QPixmap, QPainter, QPen, QColor, QPalette
 from pathlib import Path
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QFileDialog, QGroupBox,
     QFormLayout, QComboBox, QDoubleSpinBox, QSpinBox, QProgressBar,
     QMessageBox, QTextEdit, QScrollArea, QSlider, QTabWidget,
     QListWidget, QListWidgetItem, QAbstractItemView
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QRect, QPoint, QRunnable, QThreadPool, QObject, QSize
+from PySide6.QtCore import Qt, QThread, Signal, QRect, QPoint, QRunnable, QThreadPool, QObject, QSize
 
 from video_helper_tools.transcriber.transcribe_video_to_elan import transcribe_video
-from video_helper_tools.transcriber.run_minimal_whisper_server import DEFAULT_SERVER_URL, DEFAULT_SERVER_PORT
+from video_helper_tools.transcriber.protocol import DEFAULT_SERVER_URL, DEFAULT_SERVER_PORT
 
 
 class ServerLogThread(QThread):
-    log_emitted = pyqtSignal(str)
+    log_emitted = Signal(str)
     
     def __init__(self, process):
         super().__init__()
@@ -37,12 +37,12 @@ class ServerLogThread(QThread):
                     self.log_emitted.emit(line.strip())
 
 class TranscriptionThread(QThread):
-    finished = pyqtSignal(bool, str)
-    progress = pyqtSignal(str)
-    progress_update = pyqtSignal(int, int, str)
-    audio_loaded = pyqtSignal(np.ndarray, int)
-    segment_transcribed = pyqtSignal(float, float, str)
-    vad_segments_detected = pyqtSignal(list)
+    finished = Signal(bool, str)
+    progress = Signal(str)
+    progress_update = Signal(int, int, str)
+    audio_loaded = Signal(np.ndarray, int)
+    segment_transcribed = Signal(float, float, str)
+    vad_segments_detected = Signal(list)
     
     def __init__(self, video_path, server_url, server_port, eaf_path=None,
                  padding_ms=200, vad_threshold=0.2, min_speech_duration_ms=100,
@@ -105,7 +105,7 @@ class TranscriptionThread(QThread):
 
 
 class ThumbnailWorkerSignals(QObject):
-    finished = pyqtSignal(str, QImage)
+    finished = Signal(str, QImage)
 
 
 class ThumbnailWorker(QRunnable):
@@ -981,7 +981,7 @@ def main():
     app = QApplication(sys.argv)
     gui = WhisperGui()
     gui.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
