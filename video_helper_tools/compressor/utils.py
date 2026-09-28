@@ -100,26 +100,57 @@ def get_resolution_and_fps(file_path):
     except Exception:
         return None, None, None
 
-def get_video_info(file_path):
-    """Return (duration_s, fps, audio_codec) of the first real video/audio stream; None where unknown."""
+def _probe(file_path):
+    """Return (format_info, first real video stream, first audio stream), or None if unreadable."""
     cmd = [
         "ffprobe", "-v", "error",
-        "-show_entries", "format=duration:stream=codec_type,codec_name,r_frame_rate:stream_disposition=attached_pic",
+        "-show_entries",
+        "format=duration:stream=codec_type,codec_name,codec_tag_string,r_frame_rate:stream_disposition=attached_pic",
         "-of", "json", str(file_path)
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         info = json.loads(result.stdout)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
-        return None, None, None
-
+        return None
     streams = info.get("streams", [])
     # Cover art is reported as a video stream; skip it.
     video = next((s for s in streams if s.get("codec_type") == "video"
                   and not s.get("disposition", {}).get("attached_pic")), None)
     audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    return info.get("format", {}), video, audio
 
-    duration = info.get("format", {}).get("duration")
+
+# Codec/tag combinations Apple Photos imports (hev1-tagged HEVC is rejected).
+PHOTOS_VIDEO = {("hevc", "hvc1"), ("h264", "avc1")}
+PHOTOS_AUDIO = {"aac", "alac"}
+
+
+def is_photos_compatible(file_path):
+    probe = _probe(file_path)
+    if probe is None:
+        return False
+    _, video, audio = probe
+    suffix = Path(file_path).suffix.lower()
+    if suffix not in (".mov", ".mp4", ".m4v") or not video:
+        return False
+    if (video.get("codec_name"), video.get("codec_tag_string")) not in PHOTOS_VIDEO:
+        return False
+    if audio is None:
+        return True
+    codec = audio.get("codec_name", "")
+    # Uncompressed PCM (iPhone "lpcm") is only valid in a QuickTime container.
+    return codec in PHOTOS_AUDIO or (codec.startswith("pcm_") and suffix == ".mov")
+
+
+def get_video_info(file_path):
+    """Return (duration_s, fps, audio_codec) of the first real video/audio stream; None where unknown."""
+    probe = _probe(file_path)
+    if probe is None:
+        return None, None, None
+    fmt, video, audio = probe
+
+    duration = fmt.get("duration")
     duration = float(duration) if duration not in (None, "N/A") else None
 
     fps = None

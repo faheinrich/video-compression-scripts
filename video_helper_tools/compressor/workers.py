@@ -9,7 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal, QRunnable, QObject
 from PySide6.QtGui import QPixmap
 
-from .utils import get_video_info, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
+from .utils import get_video_info, is_photos_compatible, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
 
 class UnifiedScanWorker(QThread):
     file_found = Signal(dict)
@@ -297,10 +297,15 @@ class ArchiveWorker(QThread):
         result_msg = f"✅ FINISH: {src_path.name} | {format_size(src_size)} -> {format_size(dst_size)} ({ratio:.1f}%){metadata_warning}"
 
         if dst_size >= src_size:
-            rel_path = src_path.relative_to(self.src_dir)
-            backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
-            shutil.copy2(src_path, backup_path)
-            result_msg += " ⚠️ (Original kopiert)"
+            # Only keep the smaller original if it imports into Apple Photos; otherwise
+            # the (always hvc1/AAC) compressed file stays the archive copy.
+            if is_photos_compatible(src_path):
+                rel_path = src_path.relative_to(self.src_dir)
+                backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
+                shutil.copy2(src_path, backup_path)
+                result_msg += " ⚠️ (Original kopiert)"
+            else:
+                result_msg += " ⚠️ (Original nicht Apple-Fotos-kompatibel, komprimierte Version behalten)"
 
         return result_msg, data_dict
     
