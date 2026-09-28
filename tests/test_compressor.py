@@ -26,6 +26,14 @@ def make_gui(qapp):
         gui.shutdown()
 
 
+def wait_idle(qapp, gui, timeout=120):
+    """Waits until the archive thread has really ended (not just emitted finished_all)."""
+    deadline = time.monotonic() + timeout
+    while gui.is_archiving() and time.monotonic() < deadline:
+        spin(20)
+    qapp.processEvents()
+
+
 def scan(qapp, gui, src, dst):
     gui.txt_src.setText(str(src))
     gui.txt_dst.setText(str(dst))
@@ -42,7 +50,7 @@ def run_archive(qapp, gui, src, dst, renderer_index=0, crf=None):
     gui.spin_jobs.setValue(2)
     scan(qapp, gui, src, dst)
     gui.start_archiving()
-    wait_for(gui.worker.finished_all)
+    wait_idle(qapp, gui)
     qapp.processEvents()
     return gui
 
@@ -96,28 +104,47 @@ def test_every_thumbnail_arrives(qapp, make_gui, tmp_path):
 
 @requires_ffmpeg
 @requires_exiftool
-def test_overwrite_option_requeues_existing_results(qapp, make_gui, tmp_path, monkeypatch):
+@pytest.mark.parametrize("rescan", [False, True], ids=["right-after-run", "after-rescan"])
+def test_overwrite_option_reprocesses_existing_results(qapp, make_gui, tmp_path, monkeypatch, rescan):
     from PySide6.QtWidgets import QMessageBox
 
     src, dst = tmp_path / "src", tmp_path / "dst"
     src.mkdir()
     shutil.copy(EXAMPLE_VIDEOS[0], src / "a.mp4")
-    gui = run_archive(qapp, make_gui(), src, dst)
+    gui = make_gui()
+    gui.cb_dry_run.setChecked(True)
+    run_archive(qapp, gui, src, dst)
     # mtime is copied from the original on purpose, so compare the inode change time.
     first = (dst / "a_archived.mp4").stat().st_ctime_ns
-
-    gui.start_unified_scan()
-    wait_for(gui.scan_worker.scan_finished)
+    if rescan:
+        gui.start_unified_scan()
+        wait_for(gui.scan_worker.scan_finished)
     assert not gui.btn_run.isEnabled()
+    if rescan:  # everything already archived: the summary points to the overwrite option
+        assert "überschreiben" in gui.progress_text.text()
+
     gui.cb_overwrite.setChecked(True)
+    qapp.processEvents()
+    spin(300)
     assert gui.btn_run.isEnabled()
+    assert "ersetzen" in gui.progress_text.text()
 
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
     gui.start_archiving()
-    wait_for(gui.worker.finished_all)
-    qapp.processEvents()
+    wait_idle(qapp, gui)
     assert gui.model.rows[0].status == "done"
     assert (dst / "a_archived.mp4").stat().st_ctime_ns != first
+    assert not gui.btn_run.isEnabled() or gui.cb_overwrite.isChecked()
+
+
+def test_failed_videos_are_retried_on_the_next_start(qapp, make_gui, tmp_path):
+    from pathlib import Path
+    from video_helper_tools.compressor.model import VideoRow
+
+    gui = make_gui()
+    gui.scan_items = [{'path': Path("/a/one.mp4"), 'dst_path': Path("/b/one_archived.mp4"), 'size': 1}]
+    gui.model.reset([VideoRow(src=Path("/a/one.mp4"), dst=Path("/b/one_archived.mp4"), size=1, status="error")])
+    assert [item['path'].name for item in gui.queue_items()] == ["one.mp4"]
 
 
 @requires_ffmpeg

@@ -470,6 +470,7 @@ class ArchiverGUI(QWidget):
         self.cb_overwrite = QCheckBox(tr("Overwrite existing results"))
         self.cb_overwrite.setToolTip(tr("Videos that already have a result in the target folder are compressed again."))
         self.cb_overwrite.toggled.connect(self.update_run_enabled)
+        self.cb_overwrite.toggled.connect(self.request_summary)
         self.cb_dry_run = QCheckBox(tr("Test run (first second only)"))
         self.cb_dry_run.setToolTip(tr("Compresses only the first second of each video to check the settings quickly."))
         for box in (self.cb_copy_aac, self.cb_flatten, self.cb_overwrite, self.cb_dry_run):
@@ -649,8 +650,10 @@ class ArchiverGUI(QWidget):
 
     def queue_items(self):
         """Videos to process, in the table's sort order with moved-up videos first."""
-        # With "overwrite", videos whose result already exists are compressed again.
-        wanted = {"planned", "exists"} if self.cb_overwrite.isChecked() else {"planned"}
+        # Failed videos are retried; with "overwrite", every video with a result is compressed again.
+        wanted = {"planned", "error"}
+        if self.cb_overwrite.isChecked():
+            wanted |= {"exists", "done", "skipped"}
         items = [item for item in self.scan_items if self.model.row_for(item['path']).status in wanted]
         header = self.table.horizontalHeader()
         column = header.sortIndicatorSection()
@@ -698,6 +701,8 @@ class ArchiverGUI(QWidget):
             'dry_run': self.cb_dry_run.isChecked(),
         }
         queue = self.queue_items()
+        for item in queue:  # re-runs (overwrite, retry) start from a clean row
+            self.model.update(item['path'], status="planned", progress=0, speed="", note="")
         self.run_paths = {str(item['path']) for item in queue}
         self.run_bytes = sum(item['size'] for item in queue)
         self.run_started = time.monotonic()
@@ -707,7 +712,9 @@ class ArchiverGUI(QWidget):
         self.worker.file_duration_discovered_path.connect(self.on_duration_found)
         self.worker.file_progress_path.connect(self.on_file_progress)
         self.worker.ffmpeg_log_line_path.connect(self.on_log_line)
-        self.worker.finished_all.connect(self.on_finished_all)
+        # QThread.finished, not finished_all: the latter is emitted while the thread still
+        # runs, so the controls would still treat the run as active.
+        self.worker.finished.connect(self.on_finished_all)
         self.worker.start()
         self.set_run_mode(True)
         self.eta_timer.start()
@@ -844,13 +851,24 @@ class ArchiverGUI(QWidget):
             else:
                 text += " · " + tr("estimating time left…")
             return text
+        parts = []
         if run_rows:
             errors = counts.get("error", 0)
-            base = tr("Stopped: {done} of {total} finished.", done=len(finished), total=len(run_rows)) \
-                if counts.get("planned") else tr("Finished: {done} videos processed.", done=len(finished))
-            return base + (" " + tr("{count} with errors.", count=errors) if errors else "")
-        return tr("Ready: {planned} to compress, {existing} already in the target folder. Order: as sorted in the table.",
-                  planned=counts.get("planned", 0), existing=counts.get("exists", 0))
+            parts.append(tr("Stopped: {done} of {total} finished.", done=len(finished), total=len(run_rows))
+                         if counts.get("planned") else tr("Finished: {done} videos processed.", done=len(finished)))
+            if errors:
+                parts.append(tr("{count} with errors.", count=errors))
+        queue = self.queue_items()
+        replacing = sum(1 for item in queue if self.model.row_for(item['path']).out_size is not None)
+        if queue and replacing:
+            parts.append(tr("Ready: {count} to compress, {replacing} of them replace an existing result. Order: as sorted in the table.",
+                            count=len(queue), replacing=replacing))
+        elif queue:
+            parts.append(tr("Ready: {count} to compress. Order: as sorted in the table.", count=len(queue)))
+        elif not run_rows:
+            parts.append(tr("Nothing to do: all {count} videos already have a result. Turn on “Overwrite existing results” to compress them again.",
+                            count=len(rows)))
+        return " ".join(parts)
 
     # ------------------------------------------------------------- row detail
     def selected_row(self):

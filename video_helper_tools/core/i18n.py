@@ -58,8 +58,6 @@ GERMAN = {
     '{minutes} min': '{minutes} Min.',
     '{days} d {hours} h': '{days} T {hours} Std.',
     '{hours} h {minutes} min': '{hours} Std. {minutes} Min.',
-    'Ready: {planned} to compress, {existing} already in the target folder. Order: as sorted in the table.':
-        'Bereit: {planned} zu komprimieren, {existing} schon im Zielordner. Reihenfolge: wie in der Tabelle sortiert.',
     'Log: {name}': 'Log: {name}',
     'Type a path, drop a folder here, or choose one.': 'Pfad eintippen, Ordner hierher ziehen oder auswählen.',
     'Choose…': 'Auswählen…',
@@ -143,8 +141,8 @@ GERMAN = {
         '„Vorhandene Ergebnisse überschreiben“ ist aktiv: Vorhandene Dateien im Zielordner werden ersetzt. Fortfahren?',
     'Choose a source and a target folder; the scan starts automatically.':
         'Wähle Quell- und Zielordner, der Scan startet dann automatisch.',
-    'Stopped: {done} of {total} finished.': 'Angehalten: {done} von {total} fertig.',
-    'Finished: {done} videos processed.': 'Fertig: {done} Videos verarbeitet.',
+    'Ready: {count} to compress, {replacing} of them replace an existing result. Order: as sorted in the table.':
+        'Bereit: {count} zu komprimieren, davon ersetzen {replacing} ein vorhandenes Ergebnis. Reihenfolge: wie in der Tabelle sortiert.',
     'Process next': 'Als Nächstes',
     'Compare': 'Vergleichen',
     'Show result': 'Ergebnis zeigen',
@@ -161,6 +159,11 @@ GERMAN = {
         'Basierend auf den bereits komprimierten Videos (Verhältnis {ratio:.0%}).',
     'about {time} left': 'noch etwa {time}',
     'estimating time left…': 'Restzeit wird geschätzt…',
+    'Stopped: {done} of {total} finished.': 'Angehalten: {done} von {total} fertig.',
+    'Finished: {done} videos processed.': 'Fertig: {done} Videos verarbeitet.',
+    '{count} with errors.': '{count} mit Fehlern.',
+    'Ready: {count} to compress. Order: as sorted in the table.':
+        'Bereit: {count} zu komprimieren. Reihenfolge: wie in der Tabelle sortiert.',
     'Replace original with result…': 'Original durch Ergebnis ersetzen…',
     'Swap original and result…': 'Original und Ergebnis tauschen…',
     'Delete original…': 'Original löschen…',
@@ -168,7 +171,8 @@ GERMAN = {
     'Export failed: {error}': 'Export fehlgeschlagen: {error}',
     'Saving the settings failed: {error}': 'Speichern der Einstellungen fehlgeschlagen: {error}',
     'Probably not enough space: about {needed} needed.': 'Wahrscheinlich zu wenig Platz: etwa {needed} nötig.',
-    '{count} with errors.': '{count} mit Fehlern.',
+    'Nothing to do: all {count} videos already have a result. Turn on “Overwrite existing results” to compress them again.':
+        'Nichts zu tun: Alle {count} Videos haben schon ein Ergebnis. Schalte „Vorhandene Ergebnisse überschreiben“ ein, um sie neu zu komprimieren.',
     'Overwrite': 'Überschreiben',
     "Really replace the original '{name}' with the compressed version?":
         "Das Original '{name}' wirklich durch die komprimierte Version ersetzen?",
