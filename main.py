@@ -12,6 +12,7 @@ from video_helper_tools.sync.gui import VideoSyncGUI
 from video_helper_tools.transcriber.gui import WhisperGui
 from video_helper_tools.rsync_gui.gui import RsyncSyncGUI
 from video_helper_tools.transcriber import WHISPER_SERVER_FLAG
+from video_helper_tools.core.paths import settings_file
 
 class LandingPage(QWidget):
     def __init__(self, open_compressor, open_sync, open_transcriber, open_rsync):
@@ -243,14 +244,15 @@ class VideoHelperToolsSuite(QMainWindow):
 
         # Save global language preference
         try:
+            path = settings_file()
             settings = {}
-            if os.path.exists('settings.json'):
-                with open('settings.json', 'r', encoding='utf-8') as f:
+            if path.exists():
+                with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
             if 'global' not in settings:
                 settings['global'] = {}
             settings['global']['language_index'] = index
-            with open('settings.json', 'w', encoding='utf-8') as f:
+            with open(path, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=4)
         except Exception as e:
             pass
@@ -261,10 +263,11 @@ class VideoHelperToolsSuite(QMainWindow):
                 self.compressor_tab.retranslate_ui()
                 
     def load_global_settings(self):
-        if not os.path.exists('settings.json'):
+        path = settings_file()
+        if not path.exists():
             return
         try:
-            with open('settings.json', 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
             global_settings = settings.get('global', {})
             if 'language_index' in global_settings:

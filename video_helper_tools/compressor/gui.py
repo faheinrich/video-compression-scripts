@@ -12,6 +12,7 @@ from PySide6.QtCore import Slot, Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
 
 from video_helper_tools.compressor.utils import check_dependencies, format_size
+from video_helper_tools.core.paths import settings_file
 from video_helper_tools.compressor.widgets import DropLineEdit, VideoItemWidget, CompareItemWidget, CompareVideoDialog
 from video_helper_tools.compressor.workers import UnifiedScanWorker, ArchiveWorker
 
@@ -683,24 +684,26 @@ class ArchiverGUI(QWidget):
             'sort_index': self.combo_comp_sort.currentIndex()
         }
         try:
+            path = settings_file()
             settings = {}
-            if os.path.exists('settings.json'):
-                with open('settings.json', 'r', encoding='utf-8') as f:
+            if path.exists():
+                with open(path, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
-            
+
             settings['compressor'] = compressor_defaults
-            
-            with open('settings.json', 'w', encoding='utf-8') as f:
+
+            with open(path, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=4)
             QMessageBox.information(self, "Erfolg", "Standard-Einstellungen wurden gespeichert.")
         except Exception as e:
             QMessageBox.critical(self, "Fehler", f"Fehler beim Speichern der Einstellungen: {e}")
 
     def load_defaults(self):
-        if not os.path.exists('settings.json'):
+        path = settings_file()
+        if not path.exists():
             return
         try:
-            with open('settings.json', 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
             
             defaults = settings.get('compressor', {})

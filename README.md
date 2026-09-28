@@ -95,6 +95,8 @@ This opens a PySide6 (Qt 6) window with a landing page for:
 - Transcribe Audio
 - Backup (Rsync)
 
+Saved defaults are stored per user, independent of the working directory: on macOS in `~/Library/Application Support/Video Helper Tools/settings.json` (thumbnails in `~/Library/Caches/Video Helper Tools/`). A `settings.json` from older versions in the current directory is copied there on first start.
+
 ## Running the tests
 
 ```bash

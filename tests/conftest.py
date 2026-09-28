@@ -16,8 +16,11 @@ requires_exiftool = pytest.mark.skipif(not shutil.which("exiftool"), reason="exi
 
 
 @pytest.fixture(autouse=True)
-def isolated_cwd(tmp_path, monkeypatch):
-    # The app reads/writes settings.json and thumbnails/ relative to the cwd.
+def isolated_app_data(tmp_path, monkeypatch):
+    # Never touch the real ~/Library settings/cache or leave files in the repo.
+    from video_helper_tools.core.paths import HOME_OVERRIDE_ENV
+
+    monkeypatch.setenv(HOME_OVERRIDE_ENV, str(tmp_path / "app-home"))
     monkeypatch.chdir(tmp_path)
 
 

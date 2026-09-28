@@ -5,6 +5,8 @@ import re
 import hashlib
 from pathlib import Path
 
+from video_helper_tools.core.paths import thumbnail_dir
+
 def format_size(size_bytes):
     is_negative = size_bytes < 0
     size_bytes = abs(size_bytes)
@@ -22,10 +24,8 @@ def format_size(size_bytes):
     return f"{prefix}{size_bytes:.2f} {unit_found}"
 
 def get_thumbnail_path(video_path):
-    thumb_dir = Path("thumbnails")
-    thumb_dir.mkdir(exist_ok=True)
     video_hash = hashlib.md5(str(video_path).encode()).hexdigest()
-    return thumb_dir / f"{video_hash}.jpg"
+    return thumbnail_dir() / f"{video_hash}.jpg"
 
 def generate_thumbnail(video_path, output_path):
     cmd = [
