@@ -232,12 +232,14 @@ class VideoHelperToolsSuite(QMainWindow):
 
     def change_language(self, index):
         langs = ["de", "en", "fr", "es"]
-        import i18n
+        # The installed `i18n` package may not be python-i18n (e.g. PyPI `i18n` 0.2
+        # has no API at all); an exception here would abort the app from a Qt slot.
         try:
-            i18n.set_language(langs[index])
-        except AttributeError:
+            import i18n
             i18n.set('locale', langs[index])
-            
+        except (ImportError, AttributeError):
+            pass
+
         # Save global language preference
         try:
             settings = {}

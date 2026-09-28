@@ -83,17 +83,20 @@ class ArchiverGUI(QWidget):
 
     def change_language(self, index):
         langs = ["de", "en", "fr", "es"]
-        import i18n
         try:
-            i18n.set_language(langs[index])
-        except AttributeError:
+            import i18n
             i18n.set('locale', langs[index])
+        except (ImportError, AttributeError):
+            pass
         self.retranslate_ui()
-        
+
     def retranslate_ui(self):
-        import i18n
-        tr = i18n.t
-        
+        try:
+            import i18n
+            tr = getattr(i18n, "t", lambda text: text)
+        except ImportError:
+            tr = lambda text: text
+
         self.setWindowTitle(tr("Video Compressor & Archiver Pro"))
         
         for widget in self.findChildren(QWidget):
