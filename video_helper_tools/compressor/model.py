@@ -232,6 +232,13 @@ class VideoFilterProxy(QSortFilterProxyModel):
         self.text_filter = text.lower().strip()
         self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
 
+    def lessThan(self, left, right):
+        # Compare in Python: Qt's default compares by the *left* value's type, so a file
+        # under 2 GB (int) against a larger one (qlonglong) truncated the larger size.
+        model = self.sourceModel()
+        column = left.column()
+        return model.sort_key(model.rows[left.row()], column) < model.sort_key(model.rows[right.row()], column)
+
     def filterAcceptsRow(self, source_row, source_parent):
         row = self.sourceModel().rows[source_row]
         if self.status_filter and row.status not in self.status_filter:

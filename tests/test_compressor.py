@@ -552,3 +552,20 @@ def test_settings_summary_for_videotoolbox():
 
     text = describe_settings({"encoder": "videotoolbox", "vt_quality": 65, "max_res": None, "max_fps": 30, "copy_aac": True})
     assert text == "Mac-GPU · Qualität 65 · volle Auflösung · 30 fps"
+
+
+def test_size_sorting_handles_files_larger_than_2_gb(qapp):
+    # Regression: sizes above 2**31 bytes were compared as truncated 32-bit numbers.
+    from pathlib import Path
+    from PySide6.QtCore import Qt
+    from video_helper_tools.compressor.model import COL_SIZE, VideoFilterProxy, VideoRow, VideoTableModel
+
+    MB, GB = 1024 ** 2, 1024 ** 3
+    sizes = [int(610.65 * MB), int(868.43 * MB), int(5.95 * GB), int(6.80 * GB), int(83.58 * MB), int(107.24 * MB)]
+    model, proxy = VideoTableModel(), VideoFilterProxy()
+    proxy.setSourceModel(model)
+    model.reset([VideoRow(src=Path(f"/v/{i}.mp4"), dst=Path(f"/o/{i}.mp4"), size=s) for i, s in enumerate(sizes)])
+    for order in (Qt.AscendingOrder, Qt.DescendingOrder):
+        proxy.sort(COL_SIZE, order)
+        shown = [proxy.index(r, COL_SIZE).data(Qt.UserRole + 1).size for r in range(proxy.rowCount())]
+        assert shown == sorted(sizes, reverse=order == Qt.DescendingOrder)
