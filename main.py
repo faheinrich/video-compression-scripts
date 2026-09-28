@@ -11,6 +11,7 @@ from video_helper_tools.compressor.gui import ArchiverGUI
 from video_helper_tools.sync.gui import VideoSyncGUI
 from video_helper_tools.transcriber.gui import WhisperGui
 from video_helper_tools.rsync_gui.gui import RsyncSyncGUI
+from video_helper_tools.transcriber import WHISPER_SERVER_FLAG
 
 class LandingPage(QWidget):
     def __init__(self, open_compressor, open_sync, open_transcriber, open_rsync):
@@ -290,6 +291,12 @@ class VideoHelperToolsSuite(QMainWindow):
         event.accept()
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == WHISPER_SERVER_FLAG:
+        from video_helper_tools.transcriber.run_minimal_whisper_server import main as run_whisper_server
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
+        run_whisper_server()
+        return
+
     # Fix PATH for bundled macOS apps so they can find ffmpeg, ffprobe, and exiftool
     try:
         if sys.platform == 'darwin':

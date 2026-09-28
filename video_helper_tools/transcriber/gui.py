@@ -21,6 +21,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QRect, QPoint, QRunnable, QThrea
 
 from video_helper_tools.transcriber.transcribe_video_to_elan import transcribe_video
 from video_helper_tools.transcriber.protocol import DEFAULT_SERVER_URL, DEFAULT_SERVER_PORT
+from video_helper_tools.transcriber import WHISPER_SERVER_FLAG
 
 
 class ServerLogThread(QThread):
@@ -784,9 +785,11 @@ class WhisperGui(QWidget):
             else:
                 model_name = model_selection
             
-            # Command to start the server
-            cmd = [
-                sys.executable, "-m", "video_helper_tools.transcriber.run_minimal_whisper_server",
+            if getattr(sys, "frozen", False):
+                cmd = [sys.executable, WHISPER_SERVER_FLAG]
+            else:
+                cmd = [sys.executable, "-m", "video_helper_tools.transcriber.run_minimal_whisper_server"]
+            cmd += [
                 "--url", self.server_url.text(),
                 "--port", str(self.server_port.value()),
                 "--model", model_name,
