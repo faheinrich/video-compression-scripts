@@ -7,18 +7,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QLineEdit, QFileDialog, QSlider, QGridLayout,
-                             QSizePolicy)
+                             QSizePolicy, QMessageBox)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Qt, QUrl, QTimer
 from PySide6.QtGui import QPixmap, QPainter, QPen
 
+from video_helper_tools.core.i18n import tr
 from video_helper_tools.sync.video_synch import extract_audio_tracks, calculate_shift_fft, trim_video
 
 class VideoSyncGUI(QWidget):
     def __init__(self):
         super().__init__()
-        self.temp_dir = tempfile.mkdtemp()
+        # TemporaryDirectory cleans up on garbage collection or at exit; closeEvent never
+        # fires for this embedded widget.
+        self._temp = tempfile.TemporaryDirectory(prefix="video-sync-")
+        self.temp_dir = self._temp.name
         self.shift = 0.0  # Shift in seconds (vid2 - vid1)
         self.vid1_path = None
         self.vid2_path = None
@@ -36,24 +40,24 @@ class VideoSyncGUI(QWidget):
         file_layout = QGridLayout()
         main_layout.addLayout(file_layout)
 
-        file_layout.addWidget(QLabel("Video 1:"), 0, 0)
+        file_layout.addWidget(QLabel(tr("Video 1:")), 0, 0)
         self.vid1_edit = QLineEdit()
         file_layout.addWidget(self.vid1_edit, 0, 1)
-        self.vid1_btn = QPushButton("Browse")
+        self.vid1_btn = QPushButton(tr("Browse…"))
         self.vid1_btn.clicked.connect(lambda: self.browse_file(self.vid1_edit))
         file_layout.addWidget(self.vid1_btn, 0, 2)
 
-        file_layout.addWidget(QLabel("Video 2:"), 0, 3)
+        file_layout.addWidget(QLabel(tr("Video 2:")), 0, 3)
         self.vid2_edit = QLineEdit()
         file_layout.addWidget(self.vid2_edit, 0, 4)
-        self.vid2_btn = QPushButton("Browse")
+        self.vid2_btn = QPushButton(tr("Browse…"))
         self.vid2_btn.clicked.connect(lambda: self.browse_file(self.vid2_edit))
         file_layout.addWidget(self.vid2_btn, 0, 5)
 
-        file_layout.addWidget(QLabel("Target Folder:"), 1, 0)
+        file_layout.addWidget(QLabel(tr("Target folder:")), 1, 0)
         self.target_edit = QLineEdit()
         file_layout.addWidget(self.target_edit, 1, 1, 1, 4)
-        self.target_btn = QPushButton("Browse")
+        self.target_btn = QPushButton(tr("Browse…"))
         self.target_btn.clicked.connect(self.browse_folder)
         file_layout.addWidget(self.target_btn, 1, 5)
 
@@ -61,22 +65,22 @@ class VideoSyncGUI(QWidget):
         top_btn_layout = QHBoxLayout()
         main_layout.addLayout(top_btn_layout)
         
-        self.load_btn = QPushButton("Load Videos")
+        self.load_btn = QPushButton(tr("Load videos"))
         self.load_btn.clicked.connect(self.load_videos)
         top_btn_layout.addWidget(self.load_btn)
 
-        self.sync_btn = QPushButton("Sync (Calculate Shift)")
+        self.sync_btn = QPushButton(tr("Sync (calculate shift)"))
         self.sync_btn.clicked.connect(self.calculate_sync)
         top_btn_layout.addWidget(self.sync_btn)
 
-        self.shift_label = QLabel("Shift: 0.00 s")
+        self.shift_label = QLabel(tr("Shift: {seconds:.2f} s", seconds=0.0))
         top_btn_layout.addWidget(self.shift_label)
 
-        self.reset_btn = QPushButton("Reset")
+        self.reset_btn = QPushButton(tr("Reset"))
         self.reset_btn.clicked.connect(self.reset_all)
         top_btn_layout.addWidget(self.reset_btn)
 
-        self.save_btn = QPushButton("Save Synced Videos")
+        self.save_btn = QPushButton(tr("Save synced videos"))
         self.save_btn.clicked.connect(self.save_synced_videos)
         top_btn_layout.addWidget(self.save_btn)
 
@@ -102,7 +106,7 @@ class VideoSyncGUI(QWidget):
         waveform_layout = QHBoxLayout()
         main_layout.addLayout(waveform_layout)
         
-        self.waveform_label1 = QLabel("Waveform 1")
+        self.waveform_label1 = QLabel(tr("Waveform 1"))
         self.waveform_label1.setAlignment(Qt.AlignCenter)
         self.waveform_label1.setStyleSheet("border: 1px solid black; background-color: #f0f0f0;")
         self.waveform_label1.setFixedHeight(100)
@@ -110,7 +114,7 @@ class VideoSyncGUI(QWidget):
         self.waveform_label1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         waveform_layout.addWidget(self.waveform_label1)
 
-        self.waveform_label2 = QLabel("Waveform 2")
+        self.waveform_label2 = QLabel(tr("Waveform 2"))
         self.waveform_label2.setAlignment(Qt.AlignCenter)
         self.waveform_label2.setStyleSheet("border: 1px solid black; background-color: #f0f0f0;")
         self.waveform_label2.setFixedHeight(100)
@@ -130,15 +134,15 @@ class VideoSyncGUI(QWidget):
         controls_layout = QHBoxLayout()
         main_layout.addLayout(controls_layout)
 
-        self.play_btn = QPushButton("Play")
+        self.play_btn = QPushButton(tr("Play"))
         self.play_btn.clicked.connect(self.play_sync)
         controls_layout.addWidget(self.play_btn)
 
-        self.stop_btn = QPushButton("Stop")
+        self.stop_btn = QPushButton(tr("Stop"))
         self.stop_btn.clicked.connect(self.stop_playback)
         controls_layout.addWidget(self.stop_btn)
 
-        self.mute_btn = QPushButton("Mute")
+        self.mute_btn = QPushButton(tr("Mute"))
         self.mute_btn.clicked.connect(self.toggle_mute)
         controls_layout.addWidget(self.mute_btn)
 
@@ -146,7 +150,7 @@ class VideoSyncGUI(QWidget):
         self.vol_slider.setRange(0, 100)
         self.vol_slider.setValue(50)
         self.vol_slider.valueChanged.connect(self.set_volume)
-        controls_layout.addWidget(QLabel("Volume:"))
+        controls_layout.addWidget(QLabel(tr("Volume:")))
         controls_layout.addWidget(self.vol_slider)
 
         # Timer for slider update
@@ -161,7 +165,7 @@ class VideoSyncGUI(QWidget):
         # Manual adjustment
         adj_layout = QHBoxLayout()
         main_layout.addLayout(adj_layout)
-        adj_layout.addWidget(QLabel("Manual Adj:"))
+        adj_layout.addWidget(QLabel(tr("Manual adjustment:")))
 
         for val in [5, 1, 0.1, 0.01]:
             btn_plus = QPushButton(f"+{val}s")
@@ -173,12 +177,12 @@ class VideoSyncGUI(QWidget):
             adj_layout.addWidget(btn_minus)
 
     def browse_file(self, edit_widget):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Video", "", "Videos (*.mp4 *.mkv *.avi *.mov)")
+        path, _ = QFileDialog.getOpenFileName(self, tr("Select video"), "", tr("Videos (*.mp4 *.mkv *.avi *.mov)"))
         if path:
             edit_widget.setText(path)
 
     def browse_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Select Target Folder")
+        path = QFileDialog.getExistingDirectory(self, tr("Select target folder"))
         if path:
             self.target_edit.setText(path)
 
@@ -191,18 +195,11 @@ class VideoSyncGUI(QWidget):
         self.vid1_path = Path(p1)
         self.vid2_path = Path(p2)
 
-        # Create temporary copies to avoid overwriting anything
-        self.tmp_vid1 = Path(self.temp_dir) / f"tmp1_{self.vid1_path.name}"
-        self.tmp_vid2 = Path(self.temp_dir) / f"tmp2_{self.vid2_path.name}"
-        
-        shutil.copy(self.vid1_path, self.tmp_vid1)
-        shutil.copy(self.vid2_path, self.tmp_vid2)
+        # Playback only reads the files, so no temporary copies are needed.
+        self.player1.setSource(QUrl.fromLocalFile(str(self.vid1_path)))
+        self.player2.setSource(QUrl.fromLocalFile(str(self.vid2_path)))
 
-        self.player1.setSource(QUrl.fromLocalFile(str(self.tmp_vid1)))
-        self.player2.setSource(QUrl.fromLocalFile(str(self.tmp_vid2)))
-        
         self.generate_waveforms()
-        print("Videos loaded.")
 
     def generate_waveforms(self):
         # Generate waveforms for both videos
@@ -312,39 +309,12 @@ class VideoSyncGUI(QWidget):
         sig1, _ = librosa.load(str(aud1), sr=sr, mono=True)
         sig2, _ = librosa.load(str(aud2), sr=sr, mono=True)
 
-        # Debug: why are lengths different?
-        print("[calculate_sync] loaded audio")
-        print(
-            "  aud1:",
-            aud1,
-            "len:",
-            len(sig1),
-            "shape:",
-            getattr(sig1, "shape", None),
-            "dtype:",
-            getattr(sig1, "dtype", None),
-            "sr:",
-            sr,
-        )
-        print(
-            "  aud2:",
-            aud2,
-            "len:",
-            len(sig2),
-            "shape:",
-            getattr(sig2, "shape", None),
-            "dtype:",
-            getattr(sig2, "dtype", None),
-            "sr:",
-            sr,
-        )
-        
         shift_samples = calculate_shift_fft(sig1, sig2)
         self.shift = shift_samples / sr
         self.update_shift_display()
 
     def update_shift_display(self):
-        self.shift_label.setText(f"Shift: {self.shift:.2f} s")
+        self.shift_label.setText(tr("Shift: {seconds:.2f} s", seconds=self.shift))
 
     def adjust_shift(self, delta):
         self.shift += delta
@@ -422,7 +392,7 @@ class VideoSyncGUI(QWidget):
         muted = not self.audio1.isMuted()
         self.audio1.setMuted(muted)
         self.audio2.setMuted(muted)
-        self.mute_btn.setText("Unmute" if muted else "Mute")
+        self.mute_btn.setText(tr("Unmute") if muted else tr("Mute"))
 
     def reset_all(self):
         self.stop_playback()
@@ -436,16 +406,15 @@ class VideoSyncGUI(QWidget):
         self.shift = 0.0
         self.update_shift_display()
         self.waveform_label1.clear()
-        self.waveform_label1.setText("Waveform 1")
+        self.waveform_label1.setText(tr("Waveform 1"))
         self.waveform_label2.clear()
-        self.waveform_label2.setText("Waveform 2")
+        self.waveform_label2.setText(tr("Waveform 2"))
         self.scrub_slider.setValue(0)
-        print("Reset all.")
 
     def save_synced_videos(self):
         target_dir_str = self.target_edit.text()
         if not target_dir_str or not self.vid1_path or not self.vid2_path:
-            print("Missing paths for saving.")
+            QMessageBox.warning(self, tr("Save synced videos"), tr("Please load both videos and choose a target folder first."))
             return
         
         target_dir = Path(target_dir_str)
@@ -464,12 +433,7 @@ class VideoSyncGUI(QWidget):
             shutil.copy(self.vid1_path, target_dir / (self.vid1_path.stem + "_sync.mp4"))
             trim_video(self.vid2_path, start_time=start_time, output_path=target_dir / (self.vid2_path.stem + "_sync.mp4"))
         
-        print(f"Saved synced videos to {target_dir}")
-
-    def closeEvent(self, event):
-        # Cleanup temporary files
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-        super().closeEvent(event)
+        QMessageBox.information(self, tr("Save synced videos"), tr("Synced videos saved to:\n{folder}", folder=target_dir))
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

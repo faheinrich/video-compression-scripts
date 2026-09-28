@@ -24,6 +24,14 @@ def isolated_app_data(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def reset_language():
+    from video_helper_tools.core import i18n
+
+    yield
+    i18n.set_language(i18n.DEFAULT_LANGUAGE)
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PySide6.QtWidgets import QApplication

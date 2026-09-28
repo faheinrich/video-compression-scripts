@@ -1,10 +1,3 @@
-try:
-    import i18n
-
-    _ = getattr(i18n, "tr", lambda text: text)
-except ImportError:
-    def _(text):
-        return text
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, 
     QPushButton, QTextEdit, QLineEdit, QDialog, QSlider, QStyle,
@@ -19,6 +12,7 @@ from .utils import (
     format_size, format_duration, open_in_finder, get_resolution_and_fps, 
     get_thumbnail_path, generate_thumbnail
 )
+from video_helper_tools.core.i18n import tr
 from .workers import ThumbnailRunnable
 
 class DropLineEdit(QLineEdit):
@@ -91,20 +85,18 @@ class VideoItemWidget(QWidget):
         self.lbl_details.hide()
         top_layout.addWidget(self.lbl_details, stretch=1)
         
-        self.btn_find_orig = QPushButton("🔍 Orig")
-        self.btn_find_orig.setFixedWidth(55)
-        self.btn_find_orig.setStyleSheet("font-size: 10px; padding: 2px;")
+        self.btn_find_orig = QPushButton(tr("Original"))
+        self.btn_find_orig.setToolTip(tr("Show in Finder"))
         self.btn_find_orig.clicked.connect(lambda: open_in_finder(self.src_path))
         top_layout.addWidget(self.btn_find_orig)
         
-        self.btn_find_res = QPushButton("🔍 Result")
-        self.btn_find_res.setFixedWidth(65)
-        self.btn_find_res.setStyleSheet("font-size: 10px; padding: 2px;")
+        self.btn_find_res = QPushButton(tr("Result"))
+        self.btn_find_res.setToolTip(tr("Show in Finder"))
         self.btn_find_res.setEnabled(False)
         self.btn_find_res.clicked.connect(lambda: open_in_finder(self.dst_path))
         top_layout.addWidget(self.btn_find_res)
         
-        self.lbl_status = QLabel(_("Planned"))
+        self.lbl_status = QLabel(tr("⏳ Planned"))
         self.lbl_status.setAlignment(Qt.AlignCenter)
         self.lbl_status.setFixedWidth(90)
         self.set_status_style("planned")
@@ -160,7 +152,7 @@ class VideoItemWidget(QWidget):
             
             self.lbl_stats.setText(
                 f"{self.duration_str}  |  📂 {self.initial_size_str} ➜ {dst_size_str} "
-                f"({ratio:.1f}%)  |  💰 Gespart: {saved_size_str}"
+                f"({ratio:.1f}%)  |  " + tr("💰 Saved: {size}", size=saved_size_str)
             )
             if status == "finished":
                 color = "#d35400" if extra_data.get('diff_size', 0) < 0 else "#27ae60"
@@ -172,30 +164,30 @@ class VideoItemWidget(QWidget):
                     self.btn_find_res.setEnabled(True)
         
         if status == "planned":
-            self.lbl_status.setText(_("⏳ Planned"))
+            self.lbl_status.setText(tr("⏳ Planned"))
             self.lbl_status.setStyleSheet(
                 "background-color: #7f8c8d; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
             self.progress.hide()
         elif status == "running":
             if detail_text:
-                self.lbl_status.setText(f"⚡ Läuft ({detail_text})")
+                self.lbl_status.setText(tr("⚡ Running ({detail})", detail=detail_text))
             else:
-                self.lbl_status.setText(_("⚡ Running"))
+                self.lbl_status.setText(tr("⚡ Running"))
             self.lbl_status.setStyleSheet(
                 "background-color: #f1c40f; color: black; border-radius: 4px; padding: 3px; font-size: 11px; font-weight: bold;")
             self.progress.show()
         elif status == "finished":
-            self.lbl_status.setText(_("✅ Finished"))
+            self.lbl_status.setText(tr("✅ Finished"))
             self.lbl_status.setStyleSheet(
                 "background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
             self.progress.hide()
         elif status == "error":
-            self.lbl_status.setText(_("❌ Error"))
+            self.lbl_status.setText(tr("❌ Error"))
             self.lbl_status.setStyleSheet(
                 "background-color: #e74c3c; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
             self.progress.hide()
         elif status == "skipped":
-            self.lbl_status.setText(_("⏭️ Skipped"))
+            self.lbl_status.setText(tr("⏭️ Skipped"))
             self.lbl_status.setStyleSheet(
                 "background-color: #34495e; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
             self.progress.hide()
@@ -267,7 +259,7 @@ class ZoomableVideoView(QGraphicsView):
 class CompareVideoDialog(QDialog):
     def __init__(self, orig_path, comp_path, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Vergleich: {orig_path.name}")
+        self.setWindowTitle(tr("Compare: {name}", name=orig_path.name))
         
         self.setWindowState(Qt.WindowMaximized)
         
@@ -280,8 +272,8 @@ class CompareVideoDialog(QDialog):
         w_o, h_o, fps_o = get_resolution_and_fps(orig_path)
         w_c, h_c, fps_c = get_resolution_and_fps(comp_path)
         
-        orig_meta = f"{w_o}x{h_o} @ {fps_o} FPS" if w_o and h_o else "Unbekannt"
-        comp_meta = f"{w_c}x{h_c} @ {fps_c} FPS" if w_c and h_c else "Unbekannt"
+        orig_meta = f"{w_o}x{h_o} @ {fps_o} FPS" if w_o and h_o else tr("Unknown")
+        comp_meta = f"{w_c}x{h_c} @ {fps_c} FPS" if w_c and h_c else tr("Unknown")
         
         # Original Player
         self.player_orig = QMediaPlayer(self)
@@ -292,13 +284,13 @@ class CompareVideoDialog(QDialog):
 
         self.player_orig.errorOccurred.connect(self.handle_player_error)
 
-        orig_lbl = QLabel(f"<b>Original (Mausrad für Zoom, Klicken für Verschieben)</b><br>{orig_meta}")
+        orig_lbl = QLabel(tr("<b>Original (scroll to zoom, drag to pan)</b><br>{meta}", meta=orig_meta))
         orig_lbl.setAlignment(Qt.AlignCenter)
         orig_container = QVBoxLayout()
         orig_container.addWidget(orig_lbl)
         orig_container.addWidget(self.view_orig, stretch=1)
         
-        self.btn_rotate_orig = QPushButton("🔄 Rotieren")
+        self.btn_rotate_orig = QPushButton(tr("🔄 Rotate"))
         self.btn_rotate_orig.clicked.connect(lambda: self.rotate_video(self.view_orig))
         orig_container.addWidget(self.btn_rotate_orig)
         
@@ -315,13 +307,13 @@ class CompareVideoDialog(QDialog):
         # No automatic rotation here: Qt 6 already applies the file's display matrix
         # (e.g. portrait iPhone clips); rotating again would turn them sideways.
 
-        comp_lbl = QLabel(f"<b>Komprimiert (Mausrad für Zoom, Klicken für Verschieben)</b><br>{comp_meta}")
+        comp_lbl = QLabel(tr("<b>Compressed (scroll to zoom, drag to pan)</b><br>{meta}", meta=comp_meta))
         comp_lbl.setAlignment(Qt.AlignCenter)
         comp_container = QVBoxLayout()
         comp_container.addWidget(comp_lbl)
         comp_container.addWidget(self.view_comp, stretch=1)
         
-        self.btn_rotate_comp = QPushButton("🔄 Rotieren")
+        self.btn_rotate_comp = QPushButton(tr("🔄 Rotate"))
         self.btn_rotate_comp.clicked.connect(lambda: self.rotate_video(self.view_comp))
         comp_container.addWidget(self.btn_rotate_comp)
         
@@ -330,7 +322,7 @@ class CompareVideoDialog(QDialog):
         layout.addLayout(video_layout)
         
         btn_layout = QHBoxLayout()
-        self.btn_play = QPushButton("▶️ Play / ⏸️ Pause")
+        self.btn_play = QPushButton(tr("▶️ Play / ⏸️ Pause"))
         self.btn_play.clicked.connect(self.toggle_play)
         
         # Zoom Controls
@@ -348,10 +340,10 @@ class CompareVideoDialog(QDialog):
         self.btn_zoom_in.setFixedWidth(40)
         self.btn_zoom_in.clicked.connect(self.zoom_in)
         
-        self.btn_reset = QPushButton("🔄 Ansicht zurücksetzen")
+        self.btn_reset = QPushButton(tr("🔄 Reset view"))
         self.btn_reset.clicked.connect(self.reset_views)
         
-        self.btn_close = QPushButton("❌ Schließen")
+        self.btn_close = QPushButton(tr("Close"))
         self.btn_close.clicked.connect(self.close)
         
         btn_layout.addWidget(self.btn_play)
@@ -428,7 +420,7 @@ class CompareVideoDialog(QDialog):
 
     def handle_player_error(self, error, error_string=""):
         if error != QMediaPlayer.Error.NoError:
-            QMessageBox.critical(self, "Video Fehler", f"Konnte Video nicht laden: {error_string}")
+            QMessageBox.critical(self, tr("Video error"), tr("Could not load the video: {error}", error=error_string))
 
     def cleanup_players(self):
         for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
@@ -490,25 +482,23 @@ class CompareItemWidget(QWidget):
         self.lbl_stats.setStyleSheet("color: #555; font-size: 11px;")
         info_layout.addWidget(self.lbl_stats, stretch=4)
         
-        self.btn_find_orig = QPushButton("🔍 Orig")
-        self.btn_find_orig.setFixedWidth(55)
-        self.btn_find_orig.setStyleSheet("font-size: 10px; padding: 2px;")
+        self.btn_find_orig = QPushButton(tr("Original"))
+        self.btn_find_orig.setToolTip(tr("Show in Finder"))
         if orig_path:
             self.btn_find_orig.clicked.connect(lambda: open_in_finder(self.orig_path))
         else:
             self.btn_find_orig.setEnabled(False)
         info_layout.addWidget(self.btn_find_orig)
         
-        self.btn_find_comp = QPushButton("🔍 Komp")
-        self.btn_find_comp.setFixedWidth(55)
-        self.btn_find_comp.setStyleSheet("font-size: 10px; padding: 2px;")
+        self.btn_find_comp = QPushButton(tr("Compressed"))
+        self.btn_find_comp.setToolTip(tr("Show in Finder"))
         if comp_path:
             self.btn_find_comp.clicked.connect(lambda: open_in_finder(self.comp_path))
         else:
             self.btn_find_comp.setEnabled(False)
         info_layout.addWidget(self.btn_find_comp)
         
-        self.lbl_status = QLabel("✅ Finished")
+        self.lbl_status = QLabel(tr("✅ Finished"))
         self.lbl_status.setAlignment(Qt.AlignCenter)
         self.lbl_status.setFixedWidth(90)
         self.lbl_status.setStyleSheet("background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
@@ -523,31 +513,31 @@ class CompareItemWidget(QWidget):
         actions_layout = QHBoxLayout()
         actions_layout.setContentsMargins(0, 4, 0, 0)
         
-        self.btn_play = QPushButton("▶️ Videos ansehen")
+        self.btn_play = QPushButton(tr("▶️ Compare videos"))
         self.btn_play.setStyleSheet("""
             QPushButton { background-color: #27ae60; color: white; font-size: 10px; font-weight: bold; }
             QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
         """)
         
-        self.btn_overwrite = QPushButton("⚠️ Mit Komp. überschreiben")
+        self.btn_overwrite = QPushButton(tr("⚠️ Replace original"))
         self.btn_overwrite.setStyleSheet("""
             QPushButton { background-color: #f39c12; color: white; font-size: 10px; font-weight: bold; }
             QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
         """)
         
-        self.btn_swap = QPushButton("🔄 Tauschen")
+        self.btn_swap = QPushButton(tr("🔄 Swap"))
         self.btn_swap.setStyleSheet("""
             QPushButton { background-color: #3498db; color: white; font-size: 10px; font-weight: bold; }
             QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
         """)
         
-        self.btn_del_orig = QPushButton("🗑️ Original löschen")
+        self.btn_del_orig = QPushButton(tr("🗑️ Delete original"))
         self.btn_del_orig.setStyleSheet("""
             QPushButton { background-color: #e74c3c; color: white; font-size: 10px; font-weight: bold; }
             QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
         """)
         
-        self.btn_del_comp = QPushButton("🗑️ Komp. löschen")
+        self.btn_del_comp = QPushButton(tr("🗑️ Delete compressed"))
         self.btn_del_comp.setStyleSheet("""
             QPushButton { background-color: #95a5a6; color: white; font-size: 10px; font-weight: bold; }
             QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
@@ -584,16 +574,16 @@ class CompareItemWidget(QWidget):
             self.lbl_thumbnail.setStyleSheet("background-color: transparent; border: 1px solid #ccc;")
 
     def _get_stats_text(self):
-        orig_size_str = format_size(self.orig_size) if self.orig_size else "N/A"
-        comp_size_str = format_size(self.comp_size) if self.comp_size else "N/A"
+        orig_size_str = format_size(self.orig_size) if self.orig_size else tr("n/a")
+        comp_size_str = format_size(self.comp_size) if self.comp_size else tr("n/a")
         
         ratio_str = ""
         if self.orig_size and self.comp_size and self.orig_size > 0:
             ratio = (self.comp_size / self.orig_size) * 100
             diff = self.orig_size - self.comp_size
-            ratio_str = f" ({ratio:.1f}%) | Ersparnis: {format_size(diff)}"
+            ratio_str = f" ({ratio:.1f}%) | " + tr("Saved: {size}", size=format_size(diff))
             
-        return f"⏱️ {self.duration_str}  |  Original: {orig_size_str}  ➜  Komprimiert: {comp_size_str}{ratio_str}"
+        return tr("⏱️ {duration}  |  Original: {orig}  ➜  Compressed: {comp}", duration=self.duration_str, orig=orig_size_str, comp=comp_size_str) + ratio_str
 
     def update_duration(self, duration):
         self.duration_str = format_duration(duration)
@@ -602,29 +592,29 @@ class CompareItemWidget(QWidget):
     def set_status_style(self, status, detail_text="", extra_data=None):
         status = status.lower()
         if status == "planned":
-            self.lbl_status.setText(_("⏳ Planned"))
+            self.lbl_status.setText(tr("⏳ Planned"))
             self.lbl_status.setStyleSheet(
                 "background-color: #7f8c8d; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
         elif status == "running":
             if detail_text:
-                self.lbl_status.setText(f"⚡ Läuft ({detail_text})")
+                self.lbl_status.setText(tr("⚡ Running ({detail})", detail=detail_text))
             else:
-                self.lbl_status.setText(_("⚡ Running"))
+                self.lbl_status.setText(tr("⚡ Running"))
             self.lbl_status.setStyleSheet(
                 "background-color: #f1c40f; color: black; border-radius: 4px; padding: 3px; font-size: 11px; font-weight: bold;")
         elif status == "finished":
-            self.lbl_status.setText(_("✅ Finished"))
+            self.lbl_status.setText(tr("✅ Finished"))
             self.lbl_status.setStyleSheet(
                 "background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
             if extra_data and 'dst_size' in extra_data:
                 self.comp_size = extra_data['dst_size']
                 self.lbl_stats.setText(self._get_stats_text())
         elif status == "error":
-            self.lbl_status.setText(_("❌ Error"))
+            self.lbl_status.setText(tr("❌ Error"))
             self.lbl_status.setStyleSheet(
                 "background-color: #e74c3c; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
         elif status == "skipped":
-            self.lbl_status.setText(_("⏭️ Skipped"))
+            self.lbl_status.setText(tr("⏭️ Skipped"))
             self.lbl_status.setStyleSheet(
                 "background-color: #34495e; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
 

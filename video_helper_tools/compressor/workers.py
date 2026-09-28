@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal, QRunnable, QObject
 from PySide6.QtGui import QPixmap
 
+from video_helper_tools.core.i18n import tr
 from .utils import get_video_info, is_photos_compatible, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
 
 class UnifiedScanWorker(QThread):
@@ -170,13 +171,14 @@ class ArchiveWorker(QThread):
                 poll = p_ffmpeg.poll()
                 if poll is not None:
                     count += 1
-                    self.ffmpeg_log_line_path.emit(str(src_path), "\n[INFO] Kopiere Metadaten & Exif-Tags...")
+                    self.ffmpeg_log_line_path.emit(str(src_path), tr("\n[INFO] Copying metadata & EXIF tags..."))
                     success_msg, data_dict = self.finalize_video_process(p_ffmpeg, src_path, dst_path)
                     status_str = "finished" if "✅" in success_msg else "error"
-                    reason_str = "" if status_str == "finished" else "FFmpeg Fehler"
+                    reason_str = "" if status_str == "finished" else tr("FFmpeg error")
 
                     self.file_progress_path.emit(str(src_path), 100)
                     self.status_update_path.emit(str(src_path), status_str, reason_str, data_dict)
+                    self.ffmpeg_log_line_path.emit(str(src_path), success_msg)
                     self.progress_step.emit(count, success_msg)
                 else:
                     still_active.append((p_ffmpeg, src_path, dst_path, total_dur, unread_buffer))
@@ -202,9 +204,9 @@ class ArchiveWorker(QThread):
                         'ratio': (dst_size / src_size) * 100 if src_size > 0 else 100.0
                     }
                     if abs(src_dur - dst_dur) < 0.8:
-                        return None, "Bereits vorhanden", f"⏭️ SKIP: {src_path.name}", skip_data
+                        return None, tr("Already exists"), f"⏭️ SKIP: {src_path.name}", skip_data
                     else:
-                        return None, "Länge weicht ab", f"⚠️ SKIP: {src_path.name} (Länge weicht ab!)", {}
+                        return None, tr("Duration differs"), f"⚠️ SKIP: {src_path.name}", {}
             
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             
@@ -231,7 +233,7 @@ class ArchiveWorker(QThread):
             else:
                 ffmpeg_cmd += ["-c:a", "aac", "-b:a", "128k"]
             
-            if self.settings['renderer'] == "Software (CPU - libx265)":
+            if self.settings['renderer'] == "libx265":
                 ffmpeg_cmd += [
                     "-c:v", "libx265",
                     "-crf", str(self.settings['crf']),
@@ -263,13 +265,13 @@ class ArchiveWorker(QThread):
             return p_ffmpeg, None, None, {}
         
         except Exception as e:
-            return None, "Start Fehler", f"❌ FEHLER bei Start von {src_path.name}: {str(e)}", {}
+            return None, tr("Start error"), tr("❌ Could not start {name}: {error}", name=src_path.name, error=e), {}
     
     def finalize_video_process(self, p_ffmpeg, src_path, dst_path):
         data_dict = {}
         if p_ffmpeg.returncode != 0:
             if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
-            return f"❌ FEHLER bei {src_path.name}: FFmpeg Returncode {p_ffmpeg.returncode}", data_dict
+            return tr("❌ Error in {name}: FFmpeg exit code {code}", name=src_path.name, code=p_ffmpeg.returncode), data_dict
 
         # Metadata copy is best-effort: a failure here (e.g. exotic tags, missing
         # exiftool) must not throw away an otherwise successfully compressed video.
@@ -281,14 +283,14 @@ class ArchiveWorker(QThread):
             stat = src_path.stat()
             os.utime(dst_path, (stat.st_atime, stat.st_mtime))
         except Exception as e:
-            metadata_warning = f" ⚠️ (Metadaten konnten nicht kopiert werden: {e})"
+            metadata_warning = tr(" ⚠️ (metadata could not be copied: {error})", error=e)
 
         try:
             src_size = src_path.stat().st_size
             dst_size = dst_path.stat().st_size
         except OSError as e:
             if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
-            return f"❌ FEHLER bei Nachbearbeitung von {src_path.name}: {str(e)}", data_dict
+            return tr("❌ Post-processing failed for {name}: {error}", name=src_path.name, error=e), data_dict
 
         diff_size = src_size - dst_size
         ratio = (dst_size / src_size) * 100 if src_size > 0 else 100.0
@@ -303,9 +305,9 @@ class ArchiveWorker(QThread):
                 rel_path = src_path.relative_to(self.src_dir)
                 backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
                 shutil.copy2(src_path, backup_path)
-                result_msg += " ⚠️ (Original kopiert)"
+                result_msg += tr(" ⚠️ (original copied because it is smaller)")
             else:
-                result_msg += " ⚠️ (Original nicht Apple-Fotos-kompatibel, komprimierte Version behalten)"
+                result_msg += tr(" ⚠️ (original not Apple Photos compatible, kept the compressed version)")
 
         return result_msg, data_dict
     
