@@ -213,6 +213,8 @@ GERMAN = {
     '🔄 Rotate': '🔄 Drehen',
     '<b>Compressed (scroll to zoom, drag to pan)</b><br>{meta}':
         '<b>Komprimiert (Mausrad zum Zoomen, Ziehen zum Verschieben)</b><br>{meta}',
+    '⏮ From the start': '⏮ Von vorne',
+    'Space bar': 'Leertaste',
     '▶️ Play / ⏸️ Pause': '▶️ Abspielen / ⏸️ Pause',
     '🔄 Reset view': '🔄 Ansicht zurücksetzen',
     'Close': 'Schließen',

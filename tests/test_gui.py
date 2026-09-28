@@ -103,3 +103,53 @@ def test_sync_tool_volume_and_mute(qapp):
 
     sync.reset_all()
     assert sync.player1.source().isEmpty()
+
+
+def open_compare_dialog(qapp, wait_ms=2000):
+    from video_helper_tools.compressor.widgets import CompareVideoDialog
+
+    dialog = CompareVideoDialog(EXAMPLE_VIDEOS[0], EXAMPLE_VIDEOS[0])
+    dialog.show()
+    spin(wait_ms)
+    return dialog
+
+
+def test_compare_player_pulls_the_compressed_video_back_in_sync(qapp):
+    from video_helper_tools.compressor.widgets import SYNC_TOLERANCE_MS
+
+    dialog = open_compare_dialog(qapp)
+    assert dialog.is_playing()
+    assert dialog.audio_comp.isMuted() and not dialog.audio_orig.isMuted()
+    # Simulate the faster-decoding file running ahead.
+    dialog.player_comp.setPosition(dialog.player_orig.position() + 3000)
+    spin(700)
+    drift = abs(dialog.player_comp.position() - dialog.player_orig.position())
+    dialog.reject()
+    assert drift <= SYNC_TOLERANCE_MS + 250  # both keep playing between the checks
+
+
+def test_compare_player_scrubber_and_restart(qapp):
+    dialog = open_compare_dialog(qapp)
+    assert dialog.slider_pos.maximum() == dialog.player_orig.duration() > 0
+    assert dialog.lbl_time.text().endswith("/ 0:26")
+
+    dialog.pause()
+    dialog.slider_pos.setValue(15000)  # like a user click/drag on the timeline
+    spin(500)
+    for player in (dialog.player_orig, dialog.player_comp):
+        assert abs(player.position() - 15000) < 300
+    assert dialog.lbl_time.text().startswith("0:15")
+
+    dialog.restart()
+    spin(500)
+    assert dialog.is_playing()
+    assert dialog.player_orig.position() < 3000
+    dialog.reject()
+
+
+def test_enter_does_not_trigger_a_dialog_button(qapp):
+    from PySide6.QtWidgets import QPushButton
+
+    dialog = open_compare_dialog(qapp, wait_ms=300)
+    assert not any(b.isDefault() or b.autoDefault() for b in dialog.findChildren(QPushButton))
+    dialog.reject()

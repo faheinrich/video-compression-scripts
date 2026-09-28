@@ -2,12 +2,26 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QDialog, QSlider,
     QGraphicsView, QGraphicsScene, QMessageBox, QSizePolicy
 )
-from PySide6.QtCore import Qt, QUrl, QSizeF, Signal
+from PySide6.QtCore import Qt, QUrl, QSizeF, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
 from video_helper_tools.core.i18n import tr
 from .utils import get_resolution_and_fps
+
+# The compressed file decodes faster than e.g. a 4K original, so the players drift apart;
+# the original is the master clock and the compressed player is pulled back beyond this.
+SYNC_TOLERANCE_MS = 120
+READY_STATUSES = (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia,
+                  QMediaPlayer.MediaStatus.BufferingMedia)
+
+
+def format_clock(ms):
+    seconds = max(0, ms) // 1000
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
 class DropLineEdit(QLineEdit):
@@ -123,6 +137,8 @@ class CompareVideoDialog(QDialog):
         self.player_comp = QMediaPlayer(self)
         self.audio_comp = QAudioOutput(self)
         self.player_comp.setAudioOutput(self.audio_comp)
+        # One soundtrack: two slightly offset ones sound like an echo.
+        self.audio_comp.setMuted(True)
         self.view_comp = ZoomableVideoView(self.player_comp)
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -144,8 +160,24 @@ class CompareVideoDialog(QDialog):
         
         layout.addLayout(video_layout)
         
+        # Timeline: scrubbing seeks both players to the same position.
+        position_row = QHBoxLayout()
+        self.slider_pos = QSlider(Qt.Horizontal)
+        self.slider_pos.setRange(0, 0)
+        self.slider_pos.setPageStep(5000)
+        self.slider_pos.valueChanged.connect(self.seek)  # programmatic updates block signals
+        self.slider_pos.sliderPressed.connect(self.scrub_start)
+        self.slider_pos.sliderReleased.connect(self.scrub_end)
+        self.lbl_time = QLabel("0:00 / 0:00")
+        position_row.addWidget(self.slider_pos, stretch=1)
+        position_row.addWidget(self.lbl_time)
+        layout.addLayout(position_row)
+
         btn_layout = QHBoxLayout()
+        self.btn_restart = QPushButton(tr("⏮ From the start"))
+        self.btn_restart.clicked.connect(self.restart)
         self.btn_play = QPushButton(tr("▶️ Play / ⏸️ Pause"))
+        self.btn_play.setToolTip(tr("Space bar"))
         self.btn_play.clicked.connect(self.toggle_play)
         
         # Zoom Controls
@@ -169,6 +201,7 @@ class CompareVideoDialog(QDialog):
         self.btn_close = QPushButton(tr("Close"))
         self.btn_close.clicked.connect(self.close)
         
+        btn_layout.addWidget(self.btn_restart)
         btn_layout.addWidget(self.btn_play)
         btn_layout.addStretch()
         btn_layout.addWidget(QLabel("Zoom:"))
@@ -190,8 +223,22 @@ class CompareVideoDialog(QDialog):
         self.view_orig.zoom_changed.connect(self.on_view_zoom_changed)
         self.view_comp.zoom_changed.connect(self.on_view_zoom_changed)
 
-        self.player_orig.play()
-        self.player_comp.play()
+        # Enter must not trigger whichever button happens to be the dialog default (it rotated the video).
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
+            button.setDefault(False)
+        QShortcut(QKeySequence(Qt.Key_Space), self, activated=self.toggle_play)
+
+        self.scrubbing = False
+        self.resume_after_scrub = False
+        self.started = False
+        self.sync_timer = QTimer(self, interval=200)
+        self.sync_timer.timeout.connect(self.keep_in_sync)
+        self.player_orig.durationChanged.connect(self.on_duration)
+        # Start only once both files are loaded, otherwise the smaller one gets a head start.
+        for player in (self.player_orig, self.player_comp):
+            player.mediaStatusChanged.connect(self.start_when_ready)
+        self.start_when_ready()
 
         # Ensure keyboard shortcuts like ESC always lead to proper cleanup.
         # Otherwise QDialog might only hide/reject without closing immediately.
@@ -233,19 +280,82 @@ class CompareVideoDialog(QDialog):
         self.view_orig.reset_view()
         self.view_comp.reset_view()
 
+    def is_playing(self):
+        return self.player_orig.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+
+    def start_when_ready(self, *_):
+        if not self.started and all(p.mediaStatus() in READY_STATUSES for p in (self.player_orig, self.player_comp)):
+            self.started = True
+            self.play()
+
+    def play(self):
+        self.player_comp.setPosition(self.player_orig.position())
+        self.player_orig.play()
+        self.player_comp.play()
+        self.sync_timer.start()
+
+    def pause(self):
+        self.player_orig.pause()
+        self.player_comp.pause()
+        self.player_comp.setPosition(self.player_orig.position())  # show the same frame
+        self.update_timeline()
+
     def toggle_play(self):
-        if self.player_orig.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+        if self.is_playing():
+            self.pause()
+        else:
+            self.play()
+
+    def restart(self):
+        self.seek(0)
+        self.play()
+
+    def seek(self, ms):
+        for player in (self.player_orig, self.player_comp):
+            player.setPosition(ms)
+        self.update_timeline(ms)
+
+    def scrub_start(self):
+        self.scrubbing = True
+        self.resume_after_scrub = self.is_playing()
+        if self.resume_after_scrub:
             self.player_orig.pause()
             self.player_comp.pause()
-        else:
-            self.player_orig.play()
-            self.player_comp.play()
+
+    def scrub_end(self):
+        self.scrubbing = False
+        self.seek(self.slider_pos.value())
+        if self.resume_after_scrub:
+            self.play()
+
+    def keep_in_sync(self):
+        master = self.player_orig.position()
+        if self.is_playing() and abs(self.player_comp.position() - master) > SYNC_TOLERANCE_MS:
+            self.player_comp.setPosition(master)
+        if not self.scrubbing:
+            self.update_timeline(master)
+
+    def update_timeline(self, position=None):
+        position = self.player_orig.position() if position is None else position
+        if not self.scrubbing:
+            self.slider_pos.blockSignals(True)
+            self.slider_pos.setValue(position)
+            self.slider_pos.blockSignals(False)
+        self.lbl_time.setText(f"{format_clock(position)} / {format_clock(self.player_orig.duration())}")
+
+    def on_duration(self, duration):
+        self.slider_pos.setRange(0, duration)
+        self.update_timeline()
 
     def handle_player_error(self, error, error_string=""):
         if error != QMediaPlayer.Error.NoError:
             QMessageBox.critical(self, tr("Video error"), tr("Could not load the video: {error}", error=error_string))
 
     def cleanup_players(self):
+        try:
+            self.sync_timer.stop()
+        except (AttributeError, RuntimeError):  # not created yet, or already freed (__del__)
+            pass
         for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
             if player is None:
                 continue
