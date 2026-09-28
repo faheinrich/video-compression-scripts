@@ -95,6 +95,14 @@ This opens a PySide6 (Qt 6) window with a landing page for:
 - Transcribe Audio
 - Backup (Rsync)
 
+## Running the tests
+
+```bash
+uv run pytest
+```
+
+The tests run headless (Qt `offscreen` platform) against the sample videos: GUI startup, video playback in the compare/sync players, a full compress run, and transcription with a mocked Whisper server. Tests needing FFmpeg or ExifTool are skipped if those tools are missing.
+
 ## Building a Standalone Application
 
 You can package the application into a standalone macOS `.app` bundle or Windows `.exe` using PyInstaller.

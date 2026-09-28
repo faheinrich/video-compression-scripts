@@ -26,7 +26,10 @@ run-whisper-server = "video_helper_tools.transcriber.run_minimal_whisper_server:
 annotate-to-elan = "video_helper_tools.transcriber.transcribe_video_to_elan:main"
 
 [dependency-groups]
-dev = ["pyinstaller"]
+dev = [
+    "pyinstaller",
+    "pytest>=9.1.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -34,3 +37,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["video_helper_tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
