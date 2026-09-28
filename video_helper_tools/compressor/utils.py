@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 import re
 import hashlib
@@ -100,48 +101,34 @@ def get_resolution_and_fps(file_path):
         return None, None, None
 
 def get_video_info(file_path):
+    """Return (duration_s, fps, audio_codec) of the first real video/audio stream; None where unknown."""
     cmd = [
         "ffprobe", "-v", "error",
-        "-show_entries", "format=duration:stream=r_frame_rate,codec_name,codec_type",
-        "-of", "csv=p=0", str(file_path)
+        "-show_entries", "format=duration:stream=codec_type,codec_name,r_frame_rate:stream_disposition=attached_pic",
+        "-of", "json", str(file_path)
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        output = result.stdout.strip()
-        if not output: return None, None, None
-        
-        lines = output.replace('\r', '').split('\n')
-        fps = None
-        duration = None
-        audio_codec = None
-        
-        for line in lines:
-            parts = line.split(',')
-            if "video" in parts:
-                for p in parts:
-                    if '/' in p:
-                        num, den = p.split('/')
-                        if float(den) > 0: fps = float(num) / float(den)
-            elif "audio" in parts:
-                for p in parts:
-                    if p != "audio" and p != "stream" and not '/' in p and not p.replace('.', '', 1).isdigit():
-                        audio_codec = p
-                        break
-            else:
-                for p in parts:
-                    if p.replace('.', '', 1).isdigit() and duration is None:
-                        duration = float(p)
-        
-        if duration is None:
-            for line in lines:
-                for p in line.split(','):
-                    if p.replace('.', '', 1).isdigit():
-                        duration = float(p)
-                        break
-        
-        return duration, fps, audio_codec
-    except Exception:
+        info = json.loads(result.stdout)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
         return None, None, None
+
+    streams = info.get("streams", [])
+    # Cover art is reported as a video stream; skip it.
+    video = next((s for s in streams if s.get("codec_type") == "video"
+                  and not s.get("disposition", {}).get("attached_pic")), None)
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+
+    duration = info.get("format", {}).get("duration")
+    duration = float(duration) if duration not in (None, "N/A") else None
+
+    fps = None
+    if video:
+        num, _, den = video.get("r_frame_rate", "0/0").partition("/")
+        if den and float(den) > 0:
+            fps = float(num) / float(den)
+
+    return duration, fps, audio.get("codec_name") if audio else None
 
 def parse_ffmpeg_time(log_line):
     match = re.search(r"time=(\d+):(\d+):(\d+\.\d+)", log_line)

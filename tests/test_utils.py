@@ -29,3 +29,35 @@ def test_get_video_info_reads_example_video():
     assert duration == pytest.approx(26.9, abs=0.1)
     assert fps == pytest.approx(24)
     assert audio_codec == "aac"
+
+
+@requires_ffmpeg
+def test_get_video_info_without_audio_track(tmp_path):
+    import subprocess
+
+    silent = tmp_path / "silent.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(EXAMPLE_VIDEOS[0]), "-an", "-c", "copy", str(silent)], check=True)
+    duration, fps, audio_codec = get_video_info(silent)
+    assert duration == pytest.approx(26.9, abs=0.1)
+    assert fps == pytest.approx(24)
+    assert audio_codec is None
+
+
+@requires_ffmpeg
+def test_get_video_info_ignores_cover_art(tmp_path):
+    # Cover art shows up as an extra video stream (90000 fps); using it would make the
+    # compressor add an fps filter and upsample a 24 fps clip to the configured limit.
+    import subprocess
+
+    cover, with_cover = tmp_path / "cover.jpg", tmp_path / "with_cover.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(EXAMPLE_VIDEOS[0]), "-frames:v", "1", str(cover)], check=True)
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(EXAMPLE_VIDEOS[0]), "-i", str(cover),
+         "-map", "0", "-map", "1", "-c", "copy", "-disposition:v:1", "attached_pic", str(with_cover)],
+        check=True,
+    )
+    assert get_video_info(with_cover)[1] == pytest.approx(24)
+
+
+def test_get_video_info_missing_file(tmp_path):
+    assert get_video_info(tmp_path / "does-not-exist.mp4") == (None, None, None)
