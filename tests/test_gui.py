@@ -208,22 +208,24 @@ def test_players_use_software_decoding():
     assert result.stdout.strip() == ","
 
 
-def test_back_lives_in_the_toolbar_and_tools_start_at_the_top(qapp):
+def test_back_lives_in_the_title_bar_and_tools_start_below_it(qapp):
     import main
 
     window = main.VideoHelperToolsSuite()
     window.resize(1200, 800)
     window.show()
     qapp.processEvents()
-    assert not window.toolbar.isVisible()
+    assert window.toolbar.height() <= 40
+    assert not window.toolbar.back.isVisible()
 
     window.show_tool("compressor")
     qapp.processEvents()
-    assert window.toolbar.isVisible() and window.tool_title.text() == "Komprimieren & Archivieren"
-    # No extra back-button row or doubled margins above the tool.
-    assert window.compressor_tab.geometry().top() == 0
+    assert window.toolbar.back.isVisible() and window.tool_title.text() == "Komprimieren & Archivieren"
+    # The tool starts right below the slim title bar: no extra row, no doubled margins.
+    top = window.compressor_tab.mapTo(window, window.compressor_tab.rect().topLeft()).y()
+    assert top == window.toolbar.height()
 
     window.back_action.trigger()
     qapp.processEvents()
-    assert not window.toolbar.isVisible()
+    assert not window.toolbar.back.isVisible()
     window.close()

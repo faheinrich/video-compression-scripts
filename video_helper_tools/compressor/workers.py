@@ -526,7 +526,10 @@ class ThumbnailRunnable(QRunnable):
                 image = QImage(str(thumb_path))
         except Exception as e:
             print(f"Error generating thumbnail for {self.video_path}: {e}")
-        self.signals.finished.emit(str(self.video_path), image)
+        try:
+            self.signals.finished.emit(str(self.video_path), image)
+        except RuntimeError:  # the window was closed while this job was still running
+            pass
 
 
 class DurationProbeWorker(QThread):

@@ -1,9 +1,10 @@
 import sys
 import os
 import json
+import warnings
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QStyle, QToolBar,
+    QApplication, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton, QToolButton,
     QVBoxLayout, QWidget,
 )
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QIcon, QKeySequence, QPixmap
@@ -45,6 +46,51 @@ def saved_language(settings):
     # Older versions stored an index into ["Deutsch", "English", ...].
     legacy = {0: "de", 1: "en"}
     return legacy.get(global_settings.get('language_index'), DEFAULT_LANGUAGE)
+
+
+MAC_TITLE_BAR = sys.platform == "darwin"
+
+
+class TitleBar(QWidget):
+    """Top bar with the back button and the page name. On macOS it sits in the transparent
+    title bar next to the window buttons and behaves like a title bar (drag, double-click)."""
+
+    WINDOW_BUTTONS_WIDTH = 78  # the three macOS window buttons live in this strip
+
+    def __init__(self, back_action):
+        super().__init__()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(self.WINDOW_BUTTONS_WIDTH if MAC_TITLE_BAR else 8, 0, 12, 0)
+        layout.setSpacing(4)
+        self.back = QToolButton()
+        self.back.setDefaultAction(back_action)
+        self.back.setAutoRaise(True)
+        self.back.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.title = QLabel()
+        self.title.setStyleSheet("font-weight: 600;")
+        layout.addWidget(self.back)
+        layout.addWidget(self.title)
+        layout.addStretch()
+        self.setFixedHeight(28)
+
+    def match_title_bar(self, height):
+        self.setFixedHeight(max(28, height))
+
+    def show_page(self, title):
+        self.back.setVisible(title is not None)
+        self.title.setText(title or "")
+
+    def mousePressEvent(self, event):
+        handle = self.window().windowHandle()
+        if event.button() == Qt.LeftButton and handle is not None:
+            handle.startSystemMove()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        window = self.window()
+        window.showNormal() if window.isMaximized() else window.showMaximized()
 
 
 def tool_label(name):
@@ -152,13 +198,28 @@ class VideoHelperToolsSuite(QMainWindow):
             if app is not None:
                 app.setWindowIcon(icon)
 
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.layout = QVBoxLayout(self.central_widget)
-        self.layout.setContentsMargins(0, 0, 0, 0)  # pages bring their own margins
+        if MAC_TITLE_BAR:
+            # Let the content reach into the transparent title bar, like native Mac apps.
+            with warnings.catch_warnings():  # PySide warns: same value as a deprecated flag
+                warnings.simplefilter("ignore", DeprecationWarning)
+                self.setWindowFlag(Qt.WindowType.ExpandedClientAreaHint, True)
+                self.setWindowFlag(Qt.WindowType.NoTitleBarBackgroundHint, True)
+            # Qt otherwise pushes the content below the title bar again (safe area).
+            self.setAttribute(Qt.WidgetAttribute.WA_ContentsMarginsRespectsSafeArea, False)
+        self._safe_area_connected = False
 
         set_language(saved_language(load_settings()))
         self.build_toolbar()
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        outer = QVBoxLayout(self.central_widget)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self.toolbar)
+        content = QWidget()
+        outer.addWidget(content, stretch=1)
+        self.layout = QVBoxLayout(content)
+        self.layout.setContentsMargins(0, 0, 0, 0)  # pages bring their own margins
         self.tools = {}  # name -> tool widget
         self.landing_page = None
         self.build_landing_page()
@@ -168,27 +229,26 @@ class VideoHelperToolsSuite(QMainWindow):
         return self.tools.get("compressor")
 
     def build_toolbar(self):
-        # Back lives in a toolbar merged into the macOS title bar instead of its own row.
-        self.toolbar = QToolBar()
-        self.toolbar.setMovable(False)
-        self.toolbar.setFloatable(False)
-        self.toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.toolbar.toggleViewAction().setEnabled(False)
-        self.back_action = QAction(self.style().standardIcon(QStyle.SP_ArrowBack), "", self)
+        self.back_action = QAction(self)
         self.back_action.setShortcut(QKeySequence.Back)  # Cmd+[ on macOS
         self.back_action.triggered.connect(self.show_landing)
-        self.toolbar.addAction(self.back_action)
-        self.tool_title = QLabel()
-        self.tool_title.setStyleSheet("font-weight: 600; padding-left: 8px;")
-        self.toolbar.addWidget(self.tool_title)
-        self.addToolBar(self.toolbar)
-        self.setUnifiedTitleAndToolBarOnMac(True)
+        self.addAction(self.back_action)  # shortcut works even when the button is hidden
+        self.toolbar = TitleBar(self.back_action)
+        self.tool_title = self.toolbar.title
         self.retranslate_toolbar()
 
     def retranslate_toolbar(self):
-        self.back_action.setText(tr("Back"))
+        self.back_action.setText("‹ " + tr("Back"))
         self.back_action.setToolTip(tr("Back to the overview ({shortcut})",
                                        shortcut=QKeySequence(QKeySequence.Back).toString(QKeySequence.NativeText)))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        handle = self.windowHandle()
+        if MAC_TITLE_BAR and handle is not None and not self._safe_area_connected:
+            self._safe_area_connected = True
+            handle.safeAreaMarginsChanged.connect(lambda m: self.toolbar.match_title_bar(m.top()))
+            self.toolbar.match_title_bar(handle.safeAreaMargins().top())
 
     def build_landing_page(self):
         self.landing_page = LandingPage(self.show_tool)
@@ -204,7 +264,7 @@ class VideoHelperToolsSuite(QMainWindow):
 
     def show_landing(self):
         self.clear_content()
-        self.toolbar.hide()
+        self.toolbar.show_page(None)
         self.back_action.setEnabled(False)
         self.layout.addWidget(self.landing_page)
 
@@ -212,9 +272,8 @@ class VideoHelperToolsSuite(QMainWindow):
         self.clear_content()
         if name not in self.tools:
             self.tools[name] = TOOLS[name]()
-        self.tool_title.setText(tool_label(name))
+        self.toolbar.show_page(tool_label(name))
         self.back_action.setEnabled(True)
-        self.toolbar.show()
         self.layout.addWidget(self.tools[name])
 
     def show_compressor(self):
