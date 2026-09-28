@@ -11,7 +11,10 @@ from PySide6.QtCore import QThread, Signal, QRunnable, QObject
 from PySide6.QtGui import QImage
 
 from video_helper_tools.core.i18n import tr
-from .utils import get_video_info, is_photos_compatible, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
+from .utils import (
+    EXIFTOOL_CONFIG, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
+    parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
+)
 
 class UnifiedScanWorker(QThread):
     file_found = Signal(dict)
@@ -113,6 +116,23 @@ class ArchiveWorker(QThread):
         self.queue_lock = threading.Lock()
         self.queue = list(video_data_list)
         self.started = set()
+
+    def settings_record(self):
+        """What gets stored in the result file (see utils.SETTINGS_TAG)."""
+        s = self.settings
+        record = {
+            "version": 1,
+            "encoder": s.get('renderer'),
+            "max_res": s.get('max_res') if s.get('limit_res') else None,
+            "max_fps": s.get('max_fps') if s.get('limit_fps') else None,
+            "copy_aac": bool(s.get('copy_aac')),
+            "dry_run": bool(s.get('dry_run')),
+        }
+        if s.get('renderer') == "libx265":
+            record.update(crf=s.get('crf'), preset=s.get('preset'))
+        else:
+            record.update(vt_quality=s.get('vt_quality'))
+        return record
 
     def set_queue(self, items):
         """Replace the videos still waiting; ones already started are never queued again."""
@@ -299,8 +319,11 @@ class ArchiveWorker(QThread):
         # exiftool) must not throw away an otherwise successfully compressed video.
         metadata_warning = ""
         try:
+            # -config must come first; the settings tag goes after the copy so it is not overwritten.
             subprocess.run(
-                ["exiftool", "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
+                ["exiftool", "-config", str(EXIFTOOL_CONFIG),
+                 "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
+                 settings_tag_argument(self.settings_record()),
                  str(dst_path), "-overwrite_original", "-q"], check=True)
             stat = src_path.stat()
             os.utime(dst_path, (stat.st_atime, stat.st_mtime))
@@ -317,7 +340,8 @@ class ArchiveWorker(QThread):
         diff_size = src_size - dst_size
         ratio = (dst_size / src_size) * 100 if src_size > 0 else 100.0
 
-        data_dict = {'src_size': src_size, 'dst_size': dst_size, 'diff_size': diff_size, 'ratio': ratio}
+        data_dict = {'src_size': src_size, 'dst_size': dst_size, 'diff_size': diff_size, 'ratio': ratio,
+                     'settings': None if metadata_warning else self.settings_record()}
         result_msg = f"✅ FINISH: {src_path.name} | {format_size(src_size)} -> {format_size(dst_size)} ({ratio:.1f}%){metadata_warning}"
 
         if dst_size >= src_size:
@@ -511,3 +535,18 @@ class DurationProbeWorker(QThread):
             duration, _, _ = get_video_info(path)
             if duration:
                 self.duration_found.emit(str(path), duration)
+
+
+class ResultSettingsWorker(QThread):
+    """Reads the stored compression settings of existing results after a scan."""
+    settings_found = Signal(str, object)  # source path, settings dict
+
+    def __init__(self, pairs):
+        super().__init__()
+        self.pairs = list(pairs)  # (source path, result path)
+
+    def run(self):
+        found = read_compression_settings([dst for _, dst in self.pairs])
+        for src, dst in self.pairs:
+            if str(dst) in found:
+                self.settings_found.emit(str(src), found[str(dst)])

@@ -498,3 +498,57 @@ def test_delete_original_and_delete_result(archived_row):
     gui.model.update(row.src, out_size=6, status="exists")
     gui.handle_compare_action("del_orig", row)
     assert not src.exists() and dst.exists()
+
+
+@requires_ffmpeg
+@requires_exiftool
+def test_settings_are_stored_in_the_result_and_shown_after_a_restart(qapp, make_gui, tmp_path):
+    from video_helper_tools.compressor.model import COL_SETTINGS
+    from video_helper_tools.compressor.utils import is_photos_compatible, read_compression_settings
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    shutil.copy(EXAMPLE_VIDEOS[0], src / "clip.mp4")
+    gui = make_gui()
+    gui.cb_dry_run.setChecked(True)
+    gui.combo_res.setCurrentIndex(gui.combo_res.findData(1280))
+    run_archive(qapp, gui, src, dst, crf=23)
+
+    result = dst / "clip_archived.mp4"
+    stored = read_compression_settings([result])[str(result)]
+    assert stored == {"version": 1, "encoder": "libx265", "crf": 23, "preset": "ultrafast", "max_res": 1280,
+                      "max_fps": 30, "copy_aac": True, "dry_run": True}
+    assert is_photos_compatible(result)
+    assert gui.model.rows[0].settings == stored  # shown right away
+
+    restarted = make_gui()  # a fresh window, like after restarting the app
+    scan(qapp, restarted, src, dst)
+    restarted.settings_worker.wait(30_000)
+    qapp.processEvents()
+    assert restarted.model.rows[0].settings == stored
+    shown = restarted.model.index(0, COL_SETTINGS).data()
+    assert "CRF 23" in shown and "1280 px" in shown
+
+
+@requires_ffmpeg
+def test_results_made_before_settings_were_recorded_show_a_dash(qapp, make_gui, tmp_path):
+    from video_helper_tools.compressor.model import COL_SETTINGS
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    shutil.copy(EXAMPLE_VIDEOS[0], src / "clip.mp4")
+    shutil.copy(EXAMPLE_VIDEOS[0], dst / "clip_archived.mp4")  # old result without the tag
+    gui = make_gui()
+    scan(qapp, gui, src, dst)
+    gui.settings_worker.wait(30_000)
+    qapp.processEvents()
+    assert gui.model.rows[0].settings is None
+    assert gui.model.index(0, COL_SETTINGS).data() == "–"
+
+
+def test_settings_summary_for_videotoolbox():
+    from video_helper_tools.compressor.model import describe_settings
+
+    text = describe_settings({"encoder": "videotoolbox", "vt_quality": 65, "max_res": None, "max_fps": 30, "copy_aac": True})
+    assert text == "Mac-GPU · Qualität 65 · volle Auflösung · 30 fps"

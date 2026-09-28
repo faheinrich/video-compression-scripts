@@ -24,7 +24,7 @@ STATUS_COLORS = {
     "error": QColor(198, 63, 53),
 }
 
-COL_FILE, COL_DURATION, COL_SIZE, COL_RESULT, COL_STATUS = range(5)
+COL_FILE, COL_DURATION, COL_SIZE, COL_RESULT, COL_SETTINGS, COL_STATUS = range(6)
 
 
 def status_label(row):
@@ -39,6 +39,23 @@ def status_label(row):
         "skipped": tr("Skipped"),
         "error": tr("Error"),
     }[row.status]
+
+
+def describe_settings(settings, detailed=False):
+    """Short summary of the stored compression settings, e.g. "CPU · CRF 20 · slow · 1920 px · 30 fps"."""
+    if not settings:
+        return "" if detailed else "–"
+    if settings.get("encoder") == "libx265":
+        parts = [tr("CPU"), f"CRF {settings.get('crf')}", str(settings.get('preset'))]
+    else:
+        parts = [tr("Mac GPU"), tr("quality {value}", value=settings.get('vt_quality'))]
+    parts.append(f"{settings['max_res']} px" if settings.get("max_res") else tr("full resolution"))
+    parts.append(f"{settings['max_fps']} fps" if settings.get("max_fps") else tr("original frame rate"))
+    if settings.get("dry_run"):
+        parts.append(tr("test run"))
+    if detailed:
+        parts.append(tr("AAC copied") if settings.get("copy_aac") else tr("audio re-encoded"))
+    return " · ".join(parts)
 
 
 def format_clock(seconds):
@@ -60,6 +77,7 @@ class VideoRow:
     speed: str = ""
     note: str = ""
     moved_up: bool = False  # processed before the table order ("Process next")
+    settings: dict | None = None  # stored in the result file; None for results made before this existed
     root: Path | None = None
     log: list = field(default_factory=list)
 
@@ -132,6 +150,7 @@ class VideoTableModel(QAbstractTableModel):
             COL_DURATION: row.duration if row.duration is not None else -1.0,
             COL_SIZE: row.size,
             COL_RESULT: row.ratio if row.ratio is not None else 99.0,
+            COL_SETTINGS: describe_settings(row.settings),
             COL_STATUS: STATUS_ORDER.index(row.status),
         }[column]
 
@@ -146,13 +165,13 @@ class VideoTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.rows)
 
     def columnCount(self, parent=QModelIndex()):
-        return 5
+        return 6
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation != Qt.Horizontal:
             return None
         if role == Qt.DisplayRole:
-            return [tr("File"), tr("Duration"), tr("Original"), tr("Result"), tr("Status")][section]
+            return [tr("File"), tr("Duration"), tr("Original"), tr("Result"), tr("Settings"), tr("Status")][section]
         if role == Qt.TextAlignmentRole and section in (COL_DURATION, COL_SIZE, COL_RESULT):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         return None
@@ -178,6 +197,8 @@ class VideoTableModel(QAbstractTableModel):
                     return "–"
                 change = (row.ratio - 1) * 100
                 return f"{format_size(row.out_size)}  ({change:+.0f} %)"
+            if col == COL_SETTINGS:
+                return describe_settings(row.settings) if row.out_size is not None else ""
             if col == COL_STATUS:
                 return status_label(row)
         if role == Qt.TextAlignmentRole and col in (COL_DURATION, COL_SIZE, COL_RESULT):
@@ -187,6 +208,8 @@ class VideoTableModel(QAbstractTableModel):
         if role == Qt.ToolTipRole:
             if col == COL_FILE:
                 return str(row.src)
+            if col == COL_SETTINGS and row.out_size is not None:
+                return describe_settings(row.settings, detailed=True) or tr("Made before settings were recorded.")
             if row.note:
                 return row.note
         return None

@@ -13,6 +13,8 @@ def main():
         "--windowed",
         "--icon", f"docs/icons/video-helper-tools-512.png",
         "--add-data", f"docs{separator}docs",
+        # exiftool config for the tag that records the compression settings in each result
+        "--add-data", f"video_helper_tools/compressor/exiftool_vht.config{separator}video_helper_tools/compressor",
         "--hidden-import", "PySide6.QtMultimedia",
         "--hidden-import", "PySide6.QtMultimediaWidgets",
         # PyInstaller refuses to bundle when several Qt bindings are importable.

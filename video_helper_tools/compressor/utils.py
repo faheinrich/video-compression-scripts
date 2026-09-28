@@ -168,3 +168,36 @@ def parse_ffmpeg_time(log_line):
         seconds = float(match.group(3))
         return hours * 3600 + minutes * 60 + seconds
     return None
+
+
+# Settings a result was compressed with are stored in the file itself (custom XMP tag),
+# so they survive moving the file and restarting the app.
+EXIFTOOL_CONFIG = Path(__file__).with_name("exiftool_vht.config")
+SETTINGS_TAG = "XMP-vht:CompressionSettings"
+
+
+def settings_tag_argument(record):
+    return f"-{SETTINGS_TAG}={json.dumps(record, sort_keys=True)}"
+
+
+def read_compression_settings(paths):
+    """Returns {str(path): settings dict} for the files that carry the tag; one exiftool call for all."""
+    paths = [str(p) for p in paths]
+    if not paths:
+        return {}
+    cmd = ["exiftool", "-config", str(EXIFTOOL_CONFIG), "-j", f"-{SETTINGS_TAG}", "-charset", "filename=utf8", "-@", "-"]
+    try:
+        result = subprocess.run(cmd, input="\n".join(paths), capture_output=True, text=True)
+        entries = json.loads(result.stdout or "[]")
+    except (OSError, json.JSONDecodeError):
+        return {}
+    found = {}
+    for entry in entries:
+        raw = entry.get("CompressionSettings")
+        if not raw:
+            continue
+        try:
+            found[entry["SourceFile"]] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return found

@@ -15,12 +15,12 @@ from PySide6.QtWidgets import (
 from video_helper_tools.core.i18n import tr
 from video_helper_tools.core.paths import settings_file
 from .model import (
-    COL_DURATION, COL_FILE, COL_RESULT, COL_SIZE, COL_STATUS,
+    COL_DURATION, COL_FILE, COL_RESULT, COL_SETTINGS, COL_SIZE, COL_STATUS,
     FileDelegate, StatusDelegate, VideoFilterProxy, VideoRow, VideoTableModel,
 )
 from .utils import check_dependencies, format_size, open_in_finder
 from .widgets import CompareVideoDialog, DropLineEdit
-from .workers import ArchiveWorker, DurationProbeWorker, ThumbnailRunnable, UnifiedScanWorker
+from .workers import ArchiveWorker, DurationProbeWorker, ResultSettingsWorker, ThumbnailRunnable, UnifiedScanWorker
 
 RENDERERS = ["libx265", "videotoolbox"]  # index = encoder combo index = saved renderer_index
 # (CRF for libx265, quality for VideoToolbox); "archive" matches the long-standing defaults.
@@ -152,6 +152,7 @@ class ArchiverGUI(QWidget):
         self.worker = None
         self.scan_worker = None
         self.duration_worker = None
+        self.settings_worker = None
         self.log_dialog = None
         self.video_data_list = []
         self.scan_items = []
@@ -328,7 +329,7 @@ class ArchiverGUI(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(46)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(COL_FILE, QHeaderView.Stretch)
-        for col, width in ((COL_DURATION, 80), (COL_SIZE, 100), (COL_RESULT, 150), (COL_STATUS, 200)):
+        for col, width in ((COL_DURATION, 80), (COL_SIZE, 100), (COL_RESULT, 150), (COL_SETTINGS, 320), (COL_STATUS, 200)):
             header.setSectionResizeMode(col, QHeaderView.Interactive)
             header.resizeSection(col, width)
         header.setHighlightSections(False)
@@ -595,7 +596,7 @@ class ArchiverGUI(QWidget):
 
     def shutdown(self):
         self.scan_timer.stop()
-        for worker in (self.worker, self.scan_worker, self.duration_worker):
+        for worker in (self.worker, self.scan_worker, self.duration_worker, self.settings_worker):
             if worker is not None and worker.isRunning():
                 if hasattr(worker, "stop"):
                     worker.stop()
@@ -650,6 +651,8 @@ class ArchiverGUI(QWidget):
         if self.duration_worker is not None and self.duration_worker.isRunning():
             self.duration_worker.stop()
             self.duration_worker.wait()
+        if self.settings_worker is not None:
+            self.settings_worker.wait()  # a single exiftool call; results of the old scan are discarded
         self.total_src_bytes = 0
         self.total_dst_bytes = 0
         self.run_paths = set()
@@ -686,6 +689,9 @@ class ArchiverGUI(QWidget):
         self.duration_worker = DurationProbeWorker([row.src for row in rows])
         self.duration_worker.duration_found.connect(self.on_duration_found)
         self.duration_worker.start()
+        self.settings_worker = ResultSettingsWorker([(row.src, row.dst) for row in rows if row.status == "exists"])
+        self.settings_worker.settings_found.connect(self.on_settings_found)
+        self.settings_worker.start()
 
         if self.rescan_pending:
             self.rescan_pending = False
@@ -784,6 +790,8 @@ class ArchiverGUI(QWidget):
         values = {"status": status, "note": reason, "speed": ""}
         if status in ("finished", "skipped") and data:
             values["out_size"] = data.get('dst_size')
+            if status == "finished":
+                values["settings"] = data.get('settings')
             self.total_src_bytes += data.get('src_size', 0)
             self.total_dst_bytes += data.get('dst_size', 0)
         if status == "finished":
@@ -795,6 +803,10 @@ class ArchiverGUI(QWidget):
     def on_thumbnail_ready(self, path, image):
         if image is not None and not image.isNull():
             self.model.set_thumbnail(path, QPixmap.fromImage(image))
+
+    @Slot(str, object)
+    def on_settings_found(self, path, settings):
+        self.model.update(path, settings=settings)
 
     @Slot(str, float)
     def on_duration_found(self, path, duration):

@@ -18,6 +18,7 @@ uv run pyinstaller --noconfirm \
     --windowed \
     --icon "docs/icons/video-helper-tools-512.png" \
     --add-data "docs${SEP}docs" \
+    --add-data "video_helper_tools/compressor/exiftool_vht.config${SEP}video_helper_tools/compressor" \
     --hidden-import "PySide6.QtMultimedia" \
     --hidden-import "PySide6.QtMultimediaWidgets" \
     --exclude-module "PyQt5" \
