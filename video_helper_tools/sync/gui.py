@@ -7,14 +7,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QLineEdit, QFileDialog, QSlider, QGridLayout,
-                             QSizePolicy, QMessageBox)
+                             QSizePolicy, QMessageBox, QFrame, QStyle)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Qt, QUrl, QTimer
 from PySide6.QtGui import QPixmap, QPainter, QPen
 
 from video_helper_tools.core.i18n import tr
+from video_helper_tools.core.style import STYLE, caption
 from video_helper_tools.sync.video_synch import extract_audio_tracks, calculate_shift_fft, trim_video
+
+SYNC_STYLE = """
+QFrame#videoCard { background: black; border-radius: 8px; }
+QLabel#waveform { background: palette(base); border: 1px solid palette(mid); border-radius: 8px; color: palette(placeholder-text); }
+QPushButton[role="segment"]:first-of-type { border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+"""
+
 
 class VideoSyncGUI(QWidget):
     def __init__(self):
@@ -33,48 +41,71 @@ class VideoSyncGUI(QWidget):
 
         self.init_ui()
 
+    def path_field(self, title, edit, button):
+        column = QVBoxLayout()
+        column.setSpacing(2)
+        column.addWidget(caption(title))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(edit, 1)
+        row.addWidget(button)
+        column.addLayout(row)
+        return column
+
+    def video_card(self, title, widget):
+        card = QFrame(objectName="videoCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(widget)
+        return card
+
     def init_ui(self):
+        self.setStyleSheet(STYLE + SYNC_STYLE)
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 10, 12, 12)
+        main_layout.setSpacing(10)
 
         # File selection
-        file_layout = QGridLayout()
-        main_layout.addLayout(file_layout)
-
-        file_layout.addWidget(QLabel(tr("Video 1:")), 0, 0)
         self.vid1_edit = QLineEdit()
-        file_layout.addWidget(self.vid1_edit, 0, 1)
+        self.vid1_edit.setPlaceholderText(tr("Video 1:").rstrip(":"))
         self.vid1_btn = QPushButton(tr("Browse…"))
         self.vid1_btn.clicked.connect(lambda: self.browse_file(self.vid1_edit))
-        file_layout.addWidget(self.vid1_btn, 0, 2)
-
-        file_layout.addWidget(QLabel(tr("Video 2:")), 0, 3)
         self.vid2_edit = QLineEdit()
-        file_layout.addWidget(self.vid2_edit, 0, 4)
+        self.vid2_edit.setPlaceholderText(tr("Video 2:").rstrip(":"))
         self.vid2_btn = QPushButton(tr("Browse…"))
         self.vid2_btn.clicked.connect(lambda: self.browse_file(self.vid2_edit))
-        file_layout.addWidget(self.vid2_btn, 0, 5)
-
-        file_layout.addWidget(QLabel(tr("Target folder:")), 1, 0)
         self.target_edit = QLineEdit()
-        file_layout.addWidget(self.target_edit, 1, 1, 1, 4)
+        self.target_edit.setPlaceholderText(tr("Target folder:").rstrip(":"))
         self.target_btn = QPushButton(tr("Browse…"))
         self.target_btn.clicked.connect(self.browse_folder)
-        file_layout.addWidget(self.target_btn, 1, 5)
 
-        # Load & Sync buttons
+        files = QGridLayout()
+        files.setHorizontalSpacing(14)
+        files.setVerticalSpacing(6)
+        files.addLayout(self.path_field(tr("Video 1:").rstrip(":"), self.vid1_edit, self.vid1_btn), 0, 0)
+        files.addLayout(self.path_field(tr("Video 2:").rstrip(":"), self.vid2_edit, self.vid2_btn), 0, 1)
+        files.addLayout(self.path_field(tr("Target folder:").rstrip(":"), self.target_edit, self.target_btn), 1, 0, 1, 2)
+        main_layout.addLayout(files)
+
+        # Load, sync and save
         top_btn_layout = QHBoxLayout()
+        top_btn_layout.setSpacing(8)
         main_layout.addLayout(top_btn_layout)
-        
+
         self.load_btn = QPushButton(tr("Load videos"))
         self.load_btn.clicked.connect(self.load_videos)
         top_btn_layout.addWidget(self.load_btn)
 
-        self.sync_btn = QPushButton(tr("Sync (calculate shift)"))
+        self.sync_btn = QPushButton(tr("Sync (calculate shift)"), objectName="runButton")
         self.sync_btn.clicked.connect(self.calculate_sync)
         top_btn_layout.addWidget(self.sync_btn)
 
         self.shift_label = QLabel(tr("Shift: {seconds:.2f} s", seconds=0.0))
+        self.shift_label.setProperty("role", "value")
+        top_btn_layout.addSpacing(10)
         top_btn_layout.addWidget(self.shift_label)
+        top_btn_layout.addStretch()
 
         self.reset_btn = QPushButton(tr("Reset"))
         self.reset_btn.clicked.connect(self.reset_all)
@@ -86,41 +117,37 @@ class VideoSyncGUI(QWidget):
 
         # Video Players
         video_layout = QHBoxLayout()
-        main_layout.addLayout(video_layout)
+        video_layout.setSpacing(10)
+        main_layout.addLayout(video_layout, 1)
 
         self.player1 = QMediaPlayer(self)
         self.audio1 = QAudioOutput(self)
         self.player1.setAudioOutput(self.audio1)
         self.video_widget1 = QVideoWidget()
-        video_layout.addWidget(self.video_widget1)
+        video_layout.addWidget(self.video_card("1", self.video_widget1))
         self.player1.setVideoOutput(self.video_widget1)
 
         self.player2 = QMediaPlayer(self)
         self.audio2 = QAudioOutput(self)
         self.player2.setAudioOutput(self.audio2)
         self.video_widget2 = QVideoWidget()
-        video_layout.addWidget(self.video_widget2)
+        video_layout.addWidget(self.video_card("2", self.video_widget2))
         self.player2.setVideoOutput(self.video_widget2)
 
         # Waveforms
         waveform_layout = QHBoxLayout()
+        waveform_layout.setSpacing(10)
         main_layout.addLayout(waveform_layout)
-        
-        self.waveform_label1 = QLabel(tr("Waveform 1"))
-        self.waveform_label1.setAlignment(Qt.AlignCenter)
-        self.waveform_label1.setStyleSheet("border: 1px solid black; background-color: #f0f0f0;")
-        self.waveform_label1.setFixedHeight(100)
-        self.waveform_label1.setMinimumWidth(100)
-        self.waveform_label1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        waveform_layout.addWidget(self.waveform_label1)
 
+        self.waveform_label1 = QLabel(tr("Waveform 1"))
         self.waveform_label2 = QLabel(tr("Waveform 2"))
-        self.waveform_label2.setAlignment(Qt.AlignCenter)
-        self.waveform_label2.setStyleSheet("border: 1px solid black; background-color: #f0f0f0;")
-        self.waveform_label2.setFixedHeight(100)
-        self.waveform_label2.setMinimumWidth(100)
-        self.waveform_label2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        waveform_layout.addWidget(self.waveform_label2)
+        for label in (self.waveform_label1, self.waveform_label2):
+            label.setObjectName("waveform")
+            label.setAlignment(Qt.AlignCenter)
+            label.setFixedHeight(100)
+            label.setMinimumWidth(100)
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            waveform_layout.addWidget(label)
 
         # Scrubbing slider
         self.scrub_slider = QSlider(Qt.Horizontal)
@@ -132,13 +159,17 @@ class VideoSyncGUI(QWidget):
 
         # Controls
         controls_layout = QHBoxLayout()
+        controls_layout.setSpacing(8)
         main_layout.addLayout(controls_layout)
 
+        style = self.style()
         self.play_btn = QPushButton(tr("Play"))
+        self.play_btn.setIcon(style.standardIcon(QStyle.SP_MediaPlay))
         self.play_btn.clicked.connect(self.play_sync)
         controls_layout.addWidget(self.play_btn)
 
         self.stop_btn = QPushButton(tr("Stop"))
+        self.stop_btn.setIcon(style.standardIcon(QStyle.SP_MediaStop))
         self.stop_btn.clicked.connect(self.stop_playback)
         controls_layout.addWidget(self.stop_btn)
 
@@ -146,11 +177,13 @@ class VideoSyncGUI(QWidget):
         self.mute_btn.clicked.connect(self.toggle_mute)
         controls_layout.addWidget(self.mute_btn)
 
+        controls_layout.addStretch()
         self.vol_slider = QSlider(Qt.Horizontal)
         self.vol_slider.setRange(0, 100)
         self.vol_slider.setValue(50)
+        self.vol_slider.setMaximumWidth(220)
         self.vol_slider.valueChanged.connect(self.set_volume)
-        controls_layout.addWidget(QLabel(tr("Volume:")))
+        controls_layout.addWidget(caption(tr("Volume:").rstrip(":")))
         controls_layout.addWidget(self.vol_slider)
 
         # Timer for slider update
@@ -162,19 +195,22 @@ class VideoSyncGUI(QWidget):
         self.player1.durationChanged.connect(self.update_duration)
         self.player2.durationChanged.connect(self.update_duration)
 
-        # Manual adjustment
+        # Manual adjustment: earlier on the left, later on the right
         adj_layout = QHBoxLayout()
+        adj_layout.setSpacing(0)
         main_layout.addLayout(adj_layout)
-        adj_layout.addWidget(QLabel(tr("Manual adjustment:")))
+        adj_layout.addWidget(caption(tr("Manual adjustment:").rstrip(":")))
+        adj_layout.addSpacing(12)
+        adj_layout.addStretch()
 
-        for val in [5, 1, 0.1, 0.01]:
-            btn_plus = QPushButton(f"+{val}s")
-            btn_plus.clicked.connect(lambda _, v=val: self.adjust_shift(v))
-            adj_layout.addWidget(btn_plus)
-
-            btn_minus = QPushButton(f"-{val}s")
-            btn_minus.clicked.connect(lambda _, v=val: self.adjust_shift(-v))
-            adj_layout.addWidget(btn_minus)
+        steps = [-5, -1, -0.1, -0.01, 0.01, 0.1, 1, 5]
+        for val in steps:
+            btn = QPushButton(f"{val:+g}s")
+            btn.setProperty("role", "segment")
+            btn.setMinimumWidth(64)
+            btn.clicked.connect(lambda _, v=val: self.adjust_shift(v))
+            adj_layout.addWidget(btn)
+        adj_layout.addStretch()
 
     def browse_file(self, edit_widget):
         path, _ = QFileDialog.getOpenFileName(self, tr("Select video"), "", tr("Videos (*.mp4 *.mkv *.avi *.mov)"))

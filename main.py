@@ -65,10 +65,18 @@ class TitleBar(QWidget):
         self.back = QToolButton()
         self.back.setDefaultAction(back_action)
         self.back.setAutoRaise(True)
+        self.back.setCursor(Qt.PointingHandCursor)
         self.back.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.back.setStyleSheet("""
+            QToolButton { border: none; border-radius: 13px; padding: 0 14px; font-weight: 500;
+                          background: rgba(128, 128, 128, 0.16); }
+            QToolButton:hover { background: rgba(128, 128, 128, 0.28); }
+            QToolButton:pressed { background: rgba(128, 128, 128, 0.38); }
+        """)
         self.title = QLabel()
         self.title.setStyleSheet("font-weight: 600;")
-        layout.addWidget(self.back)
+        self.back.setFixedHeight(26)
+        layout.addWidget(self.back, 0, Qt.AlignVCenter)
         layout.addWidget(self.title)
         layout.addStretch()
         self.setFixedHeight(28)

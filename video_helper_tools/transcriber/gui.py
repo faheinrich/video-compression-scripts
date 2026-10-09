@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QRect, QPoint, QRunnable, QThrea
 from video_helper_tools.transcriber.transcribe_video_to_elan import transcribe_video
 from video_helper_tools.transcriber.protocol import DEFAULT_SERVER_URL, DEFAULT_SERVER_PORT
 from video_helper_tools.transcriber import WHISPER_SERVER_FLAG
+from video_helper_tools.core.style import STYLE
 from video_helper_tools.core.i18n import tr
 
 
@@ -262,6 +263,14 @@ class WaveformWidget(QWidget):
             painter.drawText(text_rect, Qt.AlignLeft | Qt.TextWordWrap, text)
 
 
+TRANSCRIBER_STYLE = """
+QGroupBox { background: palette(alternate-base); border: 1px solid palette(mid); border-radius: 8px; margin-top: 18px; padding: 10px 8px 8px 8px; font-weight: 600; }
+QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 10px; padding: 0 4px; color: palette(placeholder-text); }
+QLabel#preview { background: black; color: white; border-radius: 8px; }
+QScrollArea { border: none; }
+"""
+
+
 class WhisperGui(QWidget):
     def __init__(self):
         super().__init__()
@@ -274,7 +283,9 @@ class WhisperGui(QWidget):
         self.load_settings()
     
     def init_ui(self):
+        self.setStyleSheet(STYLE + TRANSCRIBER_STYLE)
         main_widget_layout = QVBoxLayout(self)
+        main_widget_layout.setContentsMargins(12, 10, 12, 12)
         
         # Main Tab Widget
         self.tabs = QTabWidget()
@@ -295,7 +306,7 @@ class WhisperGui(QWidget):
         main_layout = QVBoxLayout(scroll_content)
         
         # File selection and Preview
-        file_group = QGroupBox(tr("Files & Preview"))
+        file_group = QGroupBox(tr("Files & Preview").replace("&", "&&"))
         file_outer_layout = QHBoxLayout()
         
         file_layout = QFormLayout()
@@ -326,7 +337,7 @@ class WhisperGui(QWidget):
         self.preview_label = QLabel(tr("No Video Selected"))
         self.preview_label.setFixedSize(200, 150)
         self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet("border: 1px solid gray; background-color: black; color: white;")
+        self.preview_label.setObjectName("preview")
         file_outer_layout.addWidget(self.preview_label)
         
         file_group.setLayout(file_outer_layout)
@@ -339,7 +350,7 @@ class WhisperGui(QWidget):
         
         top_batch_layout = QHBoxLayout()
         
-        folder_group = QGroupBox(tr("Folder Selection"))
+        folder_group = QGroupBox(tr("Folder Selection").replace("&", "&&"))
         folder_form = QFormLayout()
         self.folder_input = QLineEdit()
         folder_btn = QPushButton(tr("Browse"))
@@ -355,7 +366,7 @@ class WhisperGui(QWidget):
         folder_group.setLayout(folder_form)
         top_batch_layout.addWidget(folder_group)
         
-        batch_server_group = QGroupBox(tr("Server Check"))
+        batch_server_group = QGroupBox(tr("Server Check").replace("&", "&&"))
         batch_server_layout = QVBoxLayout()
         
         batch_server_btn_layout = QHBoxLayout()
@@ -385,12 +396,12 @@ class WhisperGui(QWidget):
         batch_action_layout = QHBoxLayout()
         self.start_batch_btn = QPushButton(tr("Start Batch Transcription"))
         self.start_batch_btn.clicked.connect(self.start_batch)
-        self.start_batch_btn.setFixedHeight(50)
-        self.start_batch_btn.setStyleSheet("font-weight: bold; background-color: #4CAF50; color: white;")
+        self.start_batch_btn.setFixedHeight(40)
+        self.start_batch_btn.setObjectName("runButton")
         
         self.open_batch_folder_btn = QPushButton(tr("Open Results Folder"))
         self.open_batch_folder_btn.clicked.connect(self.open_batch_folder)
-        self.open_batch_folder_btn.setFixedHeight(50)
+        self.open_batch_folder_btn.setFixedHeight(40)
         
         batch_action_layout.addWidget(self.start_batch_btn, 2)
         batch_action_layout.addWidget(self.open_batch_folder_btn, 1)
@@ -402,7 +413,7 @@ class WhisperGui(QWidget):
         # User said "settings should stay similar".
         
         # Server section
-        server_group = QGroupBox(tr("Server Settings"))
+        server_group = QGroupBox(tr("Server Settings").replace("&", "&&"))
         server_layout = QFormLayout()
         
         server_ip_port_layout = QHBoxLayout()
@@ -439,10 +450,12 @@ class WhisperGui(QWidget):
         server_layout.addRow(self.server_log_widget)
         
         server_group.setLayout(server_layout)
-        main_layout.addWidget(server_group)
+        settings_row = QHBoxLayout()
+        settings_row.setSpacing(10)
+        settings_row.addWidget(server_group, 1)
         
         # Settings section
-        settings_group = QGroupBox(tr("Settings"))
+        settings_group = QGroupBox(tr("Settings").replace("&", "&&"))
         settings_layout = QFormLayout()
         
         self.whisper_model = QComboBox()
@@ -492,13 +505,14 @@ class WhisperGui(QWidget):
         settings_layout.addRow(self.advanced_widget)
         
         settings_group.setLayout(settings_layout)
-        main_layout.addWidget(settings_group)
+        settings_row.addWidget(settings_group, 1)
+        main_layout.addLayout(settings_row)
         
         # Progress and Start
         self.progress_layout = QVBoxLayout()
         
         # Waveform View
-        self.waveform_group = QGroupBox(tr("Waveform & Transcripts"))
+        self.waveform_group = QGroupBox(tr("Waveform & Transcripts").replace("&", "&&"))
         waveform_layout = QVBoxLayout()
         
         self.scroll_area = QScrollArea()
@@ -535,24 +549,25 @@ class WhisperGui(QWidget):
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton(tr("Start Transcription"))
         self.start_btn.clicked.connect(self.start_transcription)
-        self.start_btn.setFixedHeight(50)
-        self.start_btn.setStyleSheet("font-weight: bold; background-color: #4CAF50; color: white;")
+        self.start_btn.setFixedHeight(40)
+        self.start_btn.setObjectName("runButton")
         
         self.stop_btn = QPushButton(tr("Stop"))
         self.stop_btn.clicked.connect(self.stop_transcription)
-        self.stop_btn.setFixedHeight(50)
+        self.stop_btn.setFixedHeight(40)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet("font-weight: bold; background-color: #f44336; color: white;")
+        self.stop_btn.setObjectName("runButton")
+        self.stop_btn.setProperty("mode", "stop")
         
         self.show_finder_btn = QPushButton(tr("Show in Finder"))
         self.show_finder_btn.clicked.connect(self.show_in_finder)
-        self.show_finder_btn.setFixedHeight(50)
+        self.show_finder_btn.setFixedHeight(40)
         self.show_finder_btn.setEnabled(False)
         
         btn_layout.addWidget(self.start_btn, 2)
         btn_layout.addWidget(self.stop_btn, 1)
         btn_layout.addWidget(self.show_finder_btn, 1)
-        main_layout.addLayout(btn_layout)
+        single_outer_layout.addLayout(btn_layout)  # outside the scroll area so it is always visible
     
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, tr("Select Folder"))

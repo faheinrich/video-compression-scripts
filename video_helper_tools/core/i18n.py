@@ -253,6 +253,11 @@ GERMAN = {
     'Source folder:': 'Quellordner:',
     'Mirrors a folder to a backup location (e.g. an external drive) with rsync.\nOptions: {options}':
         'Spiegelt einen Ordner mit rsync an einen Backup-Ort (z.B. eine externe Festplatte).\nOptionen: {options}',
+    'Folder to back up': 'Ordner, der gesichert wird',
+    'Backup location, e.g. an external drive': 'Backup-Ort, z. B. eine externe Festplatte',
+    'The rsync output appears here once the sync is running.': 'Die rsync-Ausgabe erscheint hier, sobald der Sync läuft.',
+    'Files': 'Dateien',
+    'Elapsed': 'Dauer',
     'Start sync': 'Sync starten',
     'Stop sync': 'Sync stoppen',
     'Select source folder': 'Quellordner auswählen',
