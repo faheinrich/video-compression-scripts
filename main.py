@@ -146,10 +146,10 @@ class LandingPage(QWidget):
         btn_row.setSpacing(40)
         btn_row.setAlignment(Qt.AlignCenter)
         for name, icon in (
-            ("compressor", "tool-compressor.svg"),
-            ("sync", "tool-sync.svg"),
-            ("transcriber", "tool-transcribe.svg"),
-            ("rsync", "tool-sync.svg"),
+            ("compressor", "tool-compressor.png"),
+            ("sync", "tool-sync.png"),
+            ("transcriber", "tool-transcribe.png"),
+            ("rsync", "tool-backup.png"),
         ):
             btn_row.addWidget(self.tool_button(name, tool_label(name), icon))
         layout.addLayout(btn_row)

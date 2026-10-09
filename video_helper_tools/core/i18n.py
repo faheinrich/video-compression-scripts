@@ -115,6 +115,7 @@ GERMAN = {
     'Planned': 'Geplant',
     'Running': 'Läuft',
     'Skipped': 'Übersprungen',
+    'Duplicate target name': 'Zielname doppelt',
     'Errors': 'Fehler',
     'Scanning folders…': 'Ordner werden gescannt…',
     'No videos found in the source folder.': 'Im Quellordner wurden keine Videos gefunden.',

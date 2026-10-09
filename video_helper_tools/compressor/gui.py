@@ -673,6 +673,11 @@ class ArchiverGUI(QWidget):
                 status="exists" if exists else "planned",
                 out_size=item['comp_size'] if exists else None,
             ))
+        counts = {}
+        for row in rows:
+            counts[row.dst] = counts.get(row.dst, 0) + 1
+        for row in rows:
+            row.duplicate = counts[row.dst] > 1
         self.scan_items = items
         self.moved_up = []
         self.video_data_list = [item for item in items if not item.get('exists_compressed')]

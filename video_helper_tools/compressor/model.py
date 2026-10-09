@@ -28,6 +28,11 @@ COL_FILE, COL_DURATION, COL_SIZE, COL_RESULT, COL_SETTINGS, COL_STATUS = range(6
 
 
 def status_label(row):
+    label = _status_label(row)
+    return f"⚠ {tr('Duplicate target name')} · {label}" if row.duplicate else label
+
+
+def _status_label(row):
     if row.status == "running":
         return tr("Running · {percent} %", percent=row.progress) + (f" · {row.speed}" if row.speed else "")
     if row.status == "planned" and row.moved_up:
@@ -78,6 +83,7 @@ class VideoRow:
     progress: int = 0
     speed: str = ""
     note: str = ""
+    duplicate: bool = False  # another source file maps to the same target name
     moved_up: bool = False  # processed before the table order ("Process next")
     settings: dict | None = None  # stored in the result file; None for results made before this existed
     root: Path | None = None
