@@ -164,7 +164,11 @@ The application is organized around a modular package named `video_helper_tools`
 
 The repository includes sample media and screenshots to help demonstrate the tools:
 
-- `example_resources/` contains two short sample videos (also used by the tests)
+- `example_resources/` contains two short sample videos (also used by the tests) and audio for the shift benchmark
+  (`python -m video_helper_tools.sync.benchmark [--reference FILE]`):
+  `wilson-address-1913.ogg` is a public-domain recording of a speech by Woodrow Wilson (1913), from
+  [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Wilson_-_Address_to_the_American_Indians_edit.ogg);
+  `longer-test-audio.flac` was recorded for this project
 - `docs/armadillo-logo.png` is the project logo
 - `docs/gui-demo-screenshot.png` shows the transcription GUI
 - `docs/sync-gui-demo.png` shows the synchronization GUI
