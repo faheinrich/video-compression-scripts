@@ -1,0 +1,196 @@
+"""Benchmark for the shift algorithm (calculate_shift_fft) against a known ground truth.
+
+Two excerpts are cut from one reference recording at different start times, so the true
+shift is known exactly. Excerpt 2 is then distorted (noise, filters, reverb, codec, ...) to see how
+robust the algorithm is. Run with:
+
+    python -m video_helper_tools.sync.benchmark [--tolerance-ms 20] [--seed 0]
+"""
+import argparse
+import contextlib
+import io
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+
+import librosa
+import numpy as np
+from scipy import signal as sps
+
+from .video_synch import calculate_shift_fft
+
+SR = 16000  # the same rate the app uses for the calculation
+REFERENCE = Path(__file__).resolve().parents[2] / "example_resources" / "longer-test-audio.flac"
+EXCERPT_SECONDS = 40.0
+
+# (start of excerpt 1, start of excerpt 2) in seconds of the reference. A negative start means the
+# excerpt begins with silence, i.e. the recording started before the reference content.
+# True shift = start2 - start1 (positive: video 1 started earlier, see VideoSyncGUI).
+OFFSETS = [(0, 0), (0, 0.01), (0.02, 0), (0, 0.25), (1.0, 0), (0, 3.3333), (5.5, 0), (0, 7.77), (12.5, 0), (0, 20),
+           (-2.0, 0), (0, -4.5), (3.0, 9.1234)]
+
+
+def load_reference(path=REFERENCE):
+    audio, _ = librosa.load(str(path), sr=SR, mono=True)
+    return audio
+
+
+def excerpt(reference, start_s, length_s=EXCERPT_SECONDS):
+    start, length = round(start_s * SR), round(length_s * SR)
+    out = np.zeros(length, dtype=np.float32)
+    lo, hi = max(start, 0), min(start + length, len(reference))
+    if hi > lo:
+        out[lo - start:hi - start] = reference[lo:hi]
+    return out
+
+
+# ---------------------------------------------------------------- distortions
+
+def rms(x):
+    return float(np.sqrt(np.mean(x ** 2)) + 1e-12)
+
+
+def butter(kind, cutoff):
+    sos = sps.butter(4, cutoff, btype=kind, fs=SR, output="sos")
+    return lambda x, rng: sps.sosfilt(sos, x).astype(np.float32)
+
+
+def noise(snr_db):
+    def apply(x, rng):
+        return (x + rng.normal(0, rms(x) * 10 ** (-snr_db / 20), len(x))).astype(np.float32)
+    return apply
+
+
+def reverb(rt60):
+    def apply(x, rng):
+        t = np.arange(int(rt60 * SR)) / SR
+        impulse = rng.normal(0, 1, len(t)) * np.exp(-6.9 * t / rt60)
+        impulse[0] = 1.0
+        wet = sps.fftconvolve(x, impulse / np.sqrt(np.sum(impulse ** 2)))[:len(x)]
+        return (0.3 * x + wet).astype(np.float32)
+    return apply
+
+
+def clip(gain):
+    return lambda x, rng: np.clip(x * gain, -0.5, 0.5).astype(np.float32)
+
+
+def quantize(bits):
+    levels = 2 ** (bits - 1)
+    return lambda x, rng: (np.round(np.clip(x, -1, 1) * levels) / levels).astype(np.float32)
+
+
+def hum(x, rng):
+    t = np.arange(len(x)) / SR
+    return (x + 0.3 * rms(x) * (np.sin(2 * np.pi * 50 * t) + 0.5 * np.sin(2 * np.pi * 150 * t))).astype(np.float32)
+
+
+def narrowband(x, rng):  # an 8 kHz phone-like recording
+    low = librosa.resample(x, orig_sr=SR, target_sr=8000)
+    return librosa.resample(low, orig_sr=8000, target_sr=SR)[:len(x)]
+
+
+def codec(bitrate):
+    """Round trip through low-bitrate AAC, like a video from a phone or an upload service."""
+    def apply(x, rng):
+        import soundfile
+        with tempfile.TemporaryDirectory() as tmp:
+            wav, enc = Path(tmp, "a.wav"), Path(tmp, "a.m4a")
+            soundfile.write(wav, x, SR)
+            subprocess.run(["ffmpeg", "-v", "error", "-i", str(wav), "-c:a", "aac", "-b:a", bitrate, str(enc)], check=True)
+            subprocess.run(["ffmpeg", "-v", "error", "-i", str(enc), "-ar", str(SR), str(Path(tmp, "b.wav"))], check=True)
+            decoded, _ = soundfile.read(Path(tmp, "b.wav"), dtype="float32")
+        decoded = decoded if decoded.ndim == 1 else decoded.mean(axis=1)
+        out = np.zeros(len(x), dtype=np.float32)
+        out[:min(len(x), len(decoded))] = decoded[:len(x)]
+        return out
+    return apply
+
+
+def drift(ppm):
+    """Clock drift of the second recorder (the shift is only exact at the start of the excerpt)."""
+    def apply(x, rng):
+        stretched = sps.resample_poly(x, 10000 + round(ppm / 100), 10000).astype(np.float32)
+        return stretched[:len(x)] if len(stretched) >= len(x) else np.pad(stretched, (0, len(x) - len(stretched)))
+    return apply
+
+
+DISTORTIONS = {
+    "clean": lambda x, rng: x,
+    "gain -30 dB": lambda x, rng: x * 0.0316,
+    "inverted polarity": lambda x, rng: -x,
+    "noise SNR 20 dB": noise(20),
+    "noise SNR 5 dB": noise(5),
+    "noise SNR -5 dB": noise(-5),
+    "noise SNR -15 dB": noise(-15),
+    "lowpass 3 kHz": butter("lowpass", 3000),
+    "lowpass 500 Hz": butter("lowpass", 500),
+    "highpass 300 Hz": butter("highpass", 300),
+    "highpass 2 kHz": butter("highpass", 2000),
+    "telephone 8 kHz": narrowband,
+    "hard clipping": clip(20),
+    "8-bit quantization": quantize(8),
+    "50 Hz hum + harmonics": hum,
+    "reverb RT60 0.4 s": reverb(0.4),
+    "reverb RT60 1.5 s": reverb(1.5),
+    "AAC 24 kbps": codec("24k"),
+    "clock drift 100 ppm": drift(100),
+    "lowpass 3 kHz + noise 5 dB + reverb": lambda x, rng: reverb(0.4)(noise(5)(butter("lowpass", 3000)(x, rng), rng), rng),
+}
+
+
+# ---------------------------------------------------------------- run
+
+def estimate_shift(sig1, sig2):
+    with contextlib.redirect_stdout(io.StringIO()):  # calculate_shift_fft prints debug output
+        return calculate_shift_fft(sig1, sig2) / SR
+
+
+def run(reference, distortions=DISTORTIONS, offsets=OFFSETS, tolerance_ms=20.0, seed=0):
+    """Returns {name: [(true_shift_s, estimated_s, error_ms), ...]}."""
+    results = {}
+    for name, distort in distortions.items():
+        rng = np.random.default_rng(seed)
+        rows = []
+        for start1, start2 in offsets:
+            sig1, sig2 = excerpt(reference, start1), distort(excerpt(reference, start2), rng)
+            truth, estimate = start2 - start1, estimate_shift(sig1, sig2)
+            rows.append((truth, estimate, (estimate - truth) * 1000))
+        results[name] = rows
+    return results
+
+
+def summarize(results, tolerance_ms=20.0):
+    lines = [f"{'distortion':38} {'ok':>7} {'median |err|':>13} {'max |err|':>11}   (tolerance {tolerance_ms:g} ms)"]
+    for name, rows in results.items():
+        errors = np.abs([r[2] for r in rows])
+        ok = int(np.sum(errors <= tolerance_ms))
+        lines.append(f"{name:38} {ok:>3}/{len(rows):<3} {np.median(errors):>10.1f} ms {errors.max():>8.0f} ms")
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--tolerance-ms", type=float, default=20.0)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--details", action="store_true", help="print every failed case")
+    args = parser.parse_args()
+    if not shutil.which("ffmpeg"):
+        DISTORTIONS.pop("AAC 24 kbps")
+    reference = load_reference()
+    started = time.perf_counter()
+    results = run(reference, tolerance_ms=args.tolerance_ms, seed=args.seed)
+    print(summarize(results, args.tolerance_ms))
+    if args.details:
+        for name, rows in results.items():
+            for truth, estimate, error in rows:
+                if abs(error) > args.tolerance_ms:
+                    print(f"  FAIL {name}: true {truth:+.4f} s, estimated {estimate:+.4f} s ({error:+.0f} ms)")
+    total = sum(len(rows) for rows in results.values())
+    print(f"{total} cases in {time.perf_counter() - started:.0f} s")
+
+
+if __name__ == "__main__":
+    main()

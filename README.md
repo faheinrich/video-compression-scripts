@@ -158,13 +158,13 @@ The application is organized around a modular package named `video_helper_tools`
 - `video_helper_tools.rsync_gui` — GUI wrapper around `rsync` for folder backups
 - `tests/` — headless pytest suite
 - `docs/` — standalone documentation for each tool
-- `example_resoucres/` — sample source media files
+- `example_resources/` — sample source media files
 
 ## Example assets
 
 The repository includes sample media and screenshots to help demonstrate the tools:
 
-- `example_resoucres/` contains two short sample videos (also used by the tests)
+- `example_resources/` contains two short sample videos (also used by the tests)
 - `docs/armadillo-logo.png` is the project logo
 - `docs/gui-demo-screenshot.png` shows the transcription GUI
 - `docs/sync-gui-demo.png` shows the synchronization GUI

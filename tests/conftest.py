@@ -7,7 +7,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-EXAMPLE_VIDEOS = [REPO_ROOT / "example_resoucres" / "video1.mp4", REPO_ROOT / "example_resoucres" / "video2.mp4"]
+EXAMPLE_VIDEOS = [REPO_ROOT / "example_resources" / "video1.mp4", REPO_ROOT / "example_resources" / "video2.mp4"]
 
 requires_ffmpeg = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg/ffprobe not installed"

@@ -57,3 +57,4 @@ thumbnails/
 
 # uv virtual environment
 .venv/
+example_resources/*.mov

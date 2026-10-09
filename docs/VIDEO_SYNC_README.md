@@ -38,7 +38,7 @@ sync_videos(path_to_video_1, path_to_video_2)  # pathlib.Path objects
 
 This writes the synchronized videos into a `results/` folder next to the first video.
 
-Sample videos are provided in `example_resoucres/`.
+Sample videos are provided in `example_resources/`.
 
 ## Notes
 
