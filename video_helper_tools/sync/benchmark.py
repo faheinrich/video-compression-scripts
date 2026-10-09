@@ -166,9 +166,7 @@ def run(reference, distortions=DISTORTIONS, offsets=OFFSETS, tolerance_ms=20.0, 
         rows = []
         # Short references get shorter excerpts and proportionally smaller offsets.
         duration = len(reference) / SR
-        length = min(EXCERPT_SECONDS, 0.6 * duration)
-        # Offsets stay below half the excerpt: calculate_shift_fft cannot tell larger shifts from the opposite sign.
-        scale = min(1.0, duration / 64, 0.45 * length / max(abs(o) for pair in offsets for o in pair))
+        length, scale = min(EXCERPT_SECONDS, 0.6 * duration), min(1.0, duration / 64)
         for start1, start2 in offsets:
             start1, start2 = start1 * scale, start2 * scale
             sig1, sig2 = excerpt(reference, start1, length), distort(excerpt(reference, start2, length), rng)

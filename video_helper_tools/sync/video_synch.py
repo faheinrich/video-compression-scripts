@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 from matplotlib import pyplot as plt
 import shutil
+from scipy.fft import next_fast_len
 
 from . import PROJECT_ROOT_DIR
 
@@ -84,73 +85,36 @@ def calculate_shift_fft(signal1: npt.NDArray[float], signal2: npt.NDArray[float]
     :param plot: If True, plots the original signals and the cross-correlation.
     :return: The calculated shift in samples between the two signals.
     """
-    # Compute the FFT of both signals
-    # NOTE: np.fft.fft returns an array of the same length as the input.
-    # If signal lengths differ, the cross-spectrum multiplication below will
-    # fail unless we explicitly pad/truncate to the same length.
-    n1 = int(len(signal1))
-    n2 = int(len(signal2))
-    print(
-        "[calculate_shift_fft] signal lengths:",
-        n1,
-        n2,
-        "dtypes:",
-        getattr(signal1, "dtype", None),
-        getattr(signal2, "dtype", None),
-        "shapes:",
-        getattr(signal1, "shape", None),
-        getattr(signal2, "shape", None),
-    )
+    n1 = len(signal1)
+    n2 = len(signal2)
 
-    if n1 != n2:
-        # To compute cross-correlation via FFT we need a common FFT length.
-        # Use max length and zero-pad the shorter signal.
-        n = max(n1, n2)
-        if n1 < n:
-            signal1 = np.pad(signal1, (0, n - n1))
-        if n2 < n:
-            signal2 = np.pad(signal2, (0, n - n2))
-        print(
-            "[calculate_shift_fft] padded signals to common length:",
-            n,
-            "(n1 was",
-            n1,
-            ", n2 was",
-            n2,
-            ")",
-        )
+    # Linear (not circular) cross-correlation: zero-pad to at least n1 + n2 - 1 samples, otherwise a shift larger
+    # than half the signal length wraps around and is reported with the wrong sign.
+    n_fft = next_fast_len(n1 + n2 - 1)
+    cross_correlation = np.fft.irfft(np.fft.rfft(signal1, n_fft) * np.conj(np.fft.rfft(signal2, n_fft)), n_fft)
 
-    fft_signal1 = np.fft.fft(signal1)
-    fft_signal2 = np.fft.fft(signal2)
-    
-    # Compute the cross-spectrum
-    cross_spectrum = fft_signal1 * np.conj(fft_signal2)
-    
-    # Compute the inverse FFT of the cross-spectrum to get the cross-correlation.
-    cross_correlation = np.fft.ifft(cross_spectrum)
-    
-    # Find the index of the maximum in the cross-correlation
-    shift = np.argmax(np.abs(cross_correlation))
-    
-    # Adjust shift for signals longer than half the length (to handle negative shifts)
-    if shift > len(signal1) // 2:
-        shift -= len(signal1)
-    
+    # Index k >= 0 is the lag +k, the end of the array holds the lags -1, -2, ... -(n2 - 1).
+    lags = np.concatenate([np.arange(-(n2 - 1), 0), np.arange(0, n1)])
+    values = np.concatenate([cross_correlation[n_fft - (n2 - 1):], cross_correlation[:n1]])
+    shift = int(lags[np.argmax(np.abs(values))])
+
     if plot:
         # Plot signals and cross-correlation
-        time = np.arange(signal1.shape[0])
+        time1, time2 = np.arange(n1), np.arange(n2)
         fig, axs = plt.subplots(3, 1, figsize=(10, 8))
-        axs[0].plot(time, signal1, label="Original Signal")
-        axs[0].plot(time, signal2, label="Shifted Signal")
+        axs[0].plot(time1, signal1, label="Original Signal")
+        axs[0].plot(time2, signal2, label="Shifted Signal")
         axs[0].set_title("Signals")
         axs[0].legend()
-        axs[2].plot(time, signal1, label="Original Signal")
-        axs[2].plot(time - shift, signal2, label="Aligned Shifted Signal")
+        axs[1].plot(lags, np.abs(values))
+        axs[1].set_title("Cross-correlation")
+        axs[2].plot(time1, signal1, label="Original Signal")
+        axs[2].plot(time2 + shift, signal2, label="Aligned Shifted Signal")
         axs[2].set_title("Aligned Signals After Calculating Shift")
         axs[2].legend()
         plt.tight_layout()
         plt.show()
-    
+
     return shift
 
 
