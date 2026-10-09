@@ -42,15 +42,15 @@ def convert_audio_for_whisper(audio_input_path: Path):
 
 def extract_audio_tracks(video_path: Path, audio_output_path: Path | None = None):
     """
-    Extracts all audio tracks from a video file using ffmpeg and saves them as separate files in aac format.
+    Extracts all audio tracks from a video file using ffmpeg and saves the first one as a mono 16 kHz wav file.
     FIXME WARNING: How to extract all audio tracks? Currently only extracts the first audio track. This may be
      (very) important when dealing with screen recordings (i.e. created in OBS), which may have more audio tracks.
     :param video_path: Path to the video file from which to extract audio.
     :param audio_output_path: Path where the extracted audio file will be saved.
-        If None, it will be saved in the same directory as the video file with ".aac" suffix.
+        If None, it will be saved in the same directory as the video file with ".wav" suffix.
     """
     if audio_output_path is None:
-        audio_output_path = video_path.with_suffix(".aac")
+        audio_output_path = video_path.with_suffix(".wav")
     subprocess.run(
         [
             "ffmpeg",
@@ -58,8 +58,14 @@ def extract_audio_tracks(video_path: Path, audio_output_path: Path | None = None
             str(video_path),
             "-map",
             f"0:a:0",  # Extract the first audio track only, todo how to do all? stereo, mono, etc.
+            # Decode to mono 16 kHz PCM: libsndfile (librosa) cannot read raw AAC streams, and 16 kHz is
+            # all the shift calculation and the waveform display need.
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
             "-c:a",
-            "copy",
+            "pcm_s16le",
             str(audio_output_path),
             "-y",
             "-loglevel",
@@ -216,10 +222,10 @@ def sync_videos(vid_1_path: Path, vid_2_path: Path):
     results_folder_path = vid_1_path.parent / Path("results")
     results_folder_path.mkdir(parents=True, exist_ok=True)
     
-    aud_1_path = results_folder_path / (vid_1_path.stem + ".aac")
+    aud_1_path = results_folder_path / (vid_1_path.stem + ".wav")
     extract_audio_tracks(vid_1_path, audio_output_path=aud_1_path)
     
-    aud_2_path = results_folder_path / (vid_2_path.stem + ".aac")
+    aud_2_path = results_folder_path / (vid_2_path.stem + ".wav")
     extract_audio_tracks(vid_2_path, audio_output_path=aud_2_path)
     
     # We use the sample rate 16kHz. Only relevant here for calculating the shift, more samples may mean longer

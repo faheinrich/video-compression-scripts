@@ -241,7 +241,7 @@ class VideoSyncGUI(QWidget):
         # Generate waveforms for both videos
         self.wf_pixmaps = [None, None]
         for i, vid_path in enumerate([self.vid1_path, self.vid2_path], 1):
-            aud_path = Path(self.temp_dir) / f"wf_aud{i}.aac"
+            aud_path = Path(self.temp_dir) / f"wf_aud{i}.wav"
             extract_audio_tracks(vid_path, aud_path)
             
             sig, sr = librosa.load(str(aud_path), sr=8000, mono=True)
@@ -335,8 +335,8 @@ class VideoSyncGUI(QWidget):
         if not self.vid1_path or not self.vid2_path:
             return
         
-        aud1 = Path(self.temp_dir) / "aud1.aac"
-        aud2 = Path(self.temp_dir) / "aud2.aac"
+        aud1 = Path(self.temp_dir) / "aud1.wav"
+        aud2 = Path(self.temp_dir) / "aud2.wav"
         
         extract_audio_tracks(self.vid1_path, aud1)
         extract_audio_tracks(self.vid2_path, aud2)

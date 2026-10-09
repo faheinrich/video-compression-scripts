@@ -33,7 +33,14 @@ OFFSETS = [(0, 0), (0, 0.01), (0.02, 0), (0, 0.25), (1.0, 0), (0, 3.3333), (5.5,
 
 
 def load_reference(path=REFERENCE):
-    audio, _ = librosa.load(str(path), sr=SR, mono=True)
+    """Loads the audio of an audio or video file (the first track, mono, 16 kHz)."""
+    try:
+        audio, _ = librosa.load(str(path), sr=SR, mono=True)
+    except Exception:  # containers libsndfile cannot read (mp4, mov): decode with ffmpeg
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp, "audio.wav")
+            subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-map", "0:a:0", "-ac", "1", "-ar", str(SR), str(wav)], check=True)
+            audio, _ = librosa.load(str(wav), sr=SR, mono=True)
     return audio
 
 
@@ -125,6 +132,9 @@ DISTORTIONS = {
     "noise SNR 5 dB": noise(5),
     "noise SNR -5 dB": noise(-5),
     "noise SNR -15 dB": noise(-15),
+    "noise SNR -25 dB": noise(-25),
+    "noise SNR -35 dB": noise(-35),
+    "noise SNR -45 dB": noise(-45),
     "lowpass 3 kHz": butter("lowpass", 3000),
     "lowpass 500 Hz": butter("lowpass", 500),
     "highpass 300 Hz": butter("highpass", 300),
@@ -154,8 +164,12 @@ def run(reference, distortions=DISTORTIONS, offsets=OFFSETS, tolerance_ms=20.0, 
     for name, distort in distortions.items():
         rng = np.random.default_rng(seed)
         rows = []
+        # Short references get shorter excerpts and proportionally smaller offsets.
+        duration = len(reference) / SR
+        length, scale = min(EXCERPT_SECONDS, 0.6 * duration), min(1.0, duration / 64)
         for start1, start2 in offsets:
-            sig1, sig2 = excerpt(reference, start1), distort(excerpt(reference, start2), rng)
+            start1, start2 = start1 * scale, start2 * scale
+            sig1, sig2 = excerpt(reference, start1, length), distort(excerpt(reference, start2, length), rng)
             truth, estimate = start2 - start1, estimate_shift(sig1, sig2)
             rows.append((truth, estimate, (estimate - truth) * 1000))
         results[name] = rows
@@ -174,12 +188,14 @@ def summarize(results, tolerance_ms=20.0):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tolerance-ms", type=float, default=20.0)
+    parser.add_argument("--reference", type=Path, default=REFERENCE, help="audio or video file to cut the excerpts from")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--details", action="store_true", help="print every failed case")
     args = parser.parse_args()
     if not shutil.which("ffmpeg"):
         DISTORTIONS.pop("AAC 24 kbps")
-    reference = load_reference()
+    reference = load_reference(args.reference)
+    print(f"reference: {args.reference.name}, {len(reference) / SR:.1f} s")
     started = time.perf_counter()
     results = run(reference, tolerance_ms=args.tolerance_ms, seed=args.seed)
     print(summarize(results, args.tolerance_ms))
