@@ -258,6 +258,62 @@ GERMAN = {
     'The rsync output appears here once the sync is running.': 'Die rsync-Ausgabe erscheint hier, sobald der Sync läuft.',
     'Files': 'Dateien',
     'Elapsed': 'Dauer',
+    'About the shift calculation':
+        'Zur Berechnung des Versatzes',
+    'How the shift is calculated and how accurate it is':
+        'Wie der Versatz berechnet wird und wie genau er ist',
+    'Case':
+        'Fall',
+    'No benchmark results found.':
+        'Keine Benchmark-Ergebnisse gefunden.',
+    'The benchmark cuts two excerpts from one recording, so the true shift is known. Both excerpts are then distorted independently of each other (as with two different microphones). A result counts as correct if it is within the tolerance of the true shift. Shown: correct cases / all cases.':
+        'Der Benchmark schneidet zwei Ausschnitte aus einer Aufnahme, so ist der wahre Versatz bekannt. Beide Ausschnitte werden dann unabhängig voneinander gestört (wie bei zwei verschiedenen Mikrofonen). Ein Ergebnis gilt als richtig, wenn es innerhalb der Toleranz vom wahren Versatz liegt. Angezeigt: richtige Fälle / alle Fälle.',
+    'Tolerance: {ms} ms':
+        'Toleranz: {ms} ms',
+    'How the shift is calculated':
+        'So wird der Versatz berechnet',
+    'The sound of the first audio track of both videos is extracted (mono, 16 kHz).':
+        'Der Ton der ersten Tonspur beider Videos wird extrahiert (Mono, 16 kHz).',
+    'A cross-correlation (computed with the FFT) measures for every possible shift how well the two sounds match. The shift with the highest peak is the result.':
+        'Eine Kreuzkorrelation (berechnet mit der FFT) misst für jeden möglichen Versatz, wie gut die beiden Töne übereinstimmen. Der Versatz mit dem höchsten Peak ist das Ergebnis.',
+    'Both sounds are padded with silence first, so shifts of any size are found with the right sign.':
+        'Beide Töne werden vorher mit Stille aufgefüllt, damit auch große Versätze mit richtigem Vorzeichen gefunden werden.',
+    'The video that started earlier is trimmed at the start by the shift when you save. The result can be refined with the buttons for manual adjustment.':
+        'Das Video, das früher gestartet ist, wird beim Speichern am Anfang um den Versatz gekürzt. Das Ergebnis lässt sich mit den Buttons zur manuellen Anpassung verfeinern.',
+    'Only the sound is compared, never the picture. One sample is 0.06 ms, the real accuracy is limited by the recordings.':
+        'Verglichen wird nur der Ton, nie das Bild. Ein Sample sind 0,06 ms, die tatsächliche Genauigkeit wird durch die Aufnahmen begrenzt.',
+    'Where it works':
+        'Wo es funktioniert',
+    'Reliable with noise, filters (also telephone quality), clipping, compression and moderate reverb, as long as both recordings share enough sound.':
+        'Zuverlässig bei Rauschen, Filtern (auch Telefonqualität), Übersteuerung, Kompression und mäßigem Nachhall, solange beide Aufnahmen genug gemeinsamen Ton haben.',
+    'Heavy noise':
+        'Starkes Rauschen',
+    'fails when the noise is much louder than the sound on both recordings (about −25 dB SNR each).':
+        'scheitert, wenn das Rauschen auf beiden Aufnahmen viel lauter ist als der Ton (etwa −25 dB SNR je Aufnahme).',
+    'Strong reverb':
+        'Starker Nachhall',
+    'in very echoey rooms the result can be off by tens of milliseconds.':
+        'in sehr hallenden Räumen kann das Ergebnis um einige zehn Millisekunden abweichen.',
+    'Clock drift':
+        'Taktdrift',
+    'if the two devices run at different speeds, the shift changes over time. You get an average, and large drift (5000 ppm = 0.3 s per minute) is off by about 0.1 s.':
+        'wenn die beiden Geräte unterschiedlich schnell laufen, ändert sich der Versatz mit der Zeit. Man erhält einen Mittelwert, und bei großer Drift (5000 ppm = 0,3 s pro Minute) liegt er etwa 0,1 s daneben.',
+    'Little common sound':
+        'Wenig gemeinsamer Ton',
+    'with about one second of overlap or less the result is wrong; a few seconds are still enough.':
+        'bei etwa einer Sekunde Überlappung oder weniger ist das Ergebnis falsch; einige Sekunden reichen noch.',
+    'Repeating material':
+        'Sich wiederholendes Material',
+    'for loops, beats or constant tones the result can be off by whole multiples of the repetition.':
+        'bei Loops, Beats oder Dauertönen kann das Ergebnis um ganze Vielfache der Wiederholung abweichen.',
+    'Distance':
+        'Abstand',
+    'microphones at different distances hear the same sound at slightly different times (about 3 ms per metre). That is real, not an error.':
+        'Mikrofone in unterschiedlichem Abstand hören denselben Ton zu leicht verschiedenen Zeiten (etwa 3 ms pro Meter). Das ist real und kein Fehler.',
+    'Benchmark results':
+        'Benchmark-Ergebnisse',
+    'Run it yourself: python -m video_helper_tools.sync.benchmark':
+        'Selbst ausführen: python -m video_helper_tools.sync.benchmark',
     'Start sync': 'Sync starten',
     'Stop sync': 'Sync stoppen',
     'Select source folder': 'Quellordner auswählen',

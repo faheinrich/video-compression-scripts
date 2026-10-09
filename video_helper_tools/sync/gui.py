@@ -15,6 +15,7 @@ from PySide6.QtGui import QPixmap, QPainter, QPen
 
 from video_helper_tools.core.i18n import tr
 from video_helper_tools.core.style import STYLE, caption
+from video_helper_tools.sync.info import SyncInfoDialog
 from video_helper_tools.sync.video_synch import extract_audio_tracks, calculate_shift_fft, trim_video
 
 SYNC_STYLE = """
@@ -106,6 +107,11 @@ class VideoSyncGUI(QWidget):
         top_btn_layout.addSpacing(10)
         top_btn_layout.addWidget(self.shift_label)
         top_btn_layout.addStretch()
+
+        self.info_btn = QPushButton("ⓘ  " + tr("Info"))
+        self.info_btn.setToolTip(tr("How the shift is calculated and how accurate it is"))
+        self.info_btn.clicked.connect(self.show_info)
+        top_btn_layout.addWidget(self.info_btn)
 
         self.reset_btn = QPushButton(tr("Reset"))
         self.reset_btn.clicked.connect(self.reset_all)
@@ -211,6 +217,9 @@ class VideoSyncGUI(QWidget):
             btn.clicked.connect(lambda _, v=val: self.adjust_shift(v))
             adj_layout.addWidget(btn)
         adj_layout.addStretch()
+
+    def show_info(self):
+        SyncInfoDialog(self).exec()
 
     def browse_file(self, edit_widget):
         path, _ = QFileDialog.getOpenFileName(self, tr("Select video"), "", tr("Videos (*.mp4 *.mkv *.avi *.mov)"))

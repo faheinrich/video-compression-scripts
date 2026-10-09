@@ -9,6 +9,7 @@ robust the algorithm is. Run with:
 import argparse
 import contextlib
 import io
+import json
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +24,7 @@ from .video_synch import calculate_shift_fft
 
 SR = 16000  # the same rate the app uses for the calculation
 REFERENCE = Path(__file__).resolve().parents[2] / "example_resources" / "longer-test-audio.flac"
+RESULTS_FILE = Path(__file__).resolve().parents[2] / "docs" / "sync-benchmark.json"
 EXCERPT_SECONDS = 40.0
 
 # (start of excerpt 1, start of excerpt 2) in seconds of the reference. A negative start means the
@@ -147,6 +149,8 @@ DISTORTIONS = {
     "reverb RT60 1.5 s": reverb(1.5),
     "AAC 24 kbps": codec("24k"),
     "clock drift 100 ppm": drift(100),
+    "clock drift 1000 ppm": drift(1000),
+    "clock drift 5000 ppm": drift(5000),
     "lowpass 3 kHz + noise 5 dB + reverb": lambda x, rng: reverb(0.4)(noise(5)(butter("lowpass", 3000)(x, rng), rng), rng),
 }
 
@@ -158,30 +162,93 @@ def estimate_shift(sig1, sig2):
         return calculate_shift_fft(sig1, sig2) / SR
 
 
-def run(reference, distortions=DISTORTIONS, offsets=OFFSETS, tolerance_ms=20.0, seed=0):
-    """Returns {name: [(true_shift_s, estimated_s, error_ms), ...]}."""
+def run(reference, distortions=DISTORTIONS, offsets=OFFSETS, tolerance_ms=20.0, seed=0, absolute=False, both=True):
+    """Returns {name: [(true_shift_s, estimated_s, error_ms), ...]}.
+    With absolute=True the offsets are used as they are (no scaling for short references).
+    With both=True the distortion is applied to both excerpts, each with its own randomness (two different
+    microphones and rooms); otherwise only excerpt 2 is distorted. Clock drift is always one-sided because it
+    describes the difference between two devices."""
     results = {}
     for name, distort in distortions.items():
         rng = np.random.default_rng(seed)
         rows = []
         # Short references get shorter excerpts and proportionally smaller offsets.
         duration = len(reference) / SR
-        length, scale = min(EXCERPT_SECONDS, 0.6 * duration), min(1.0, duration / 64)
+        length, scale = min(EXCERPT_SECONDS, 0.6 * duration), 1.0 if absolute else min(1.0, duration / 64)
         for start1, start2 in offsets:
             start1, start2 = start1 * scale, start2 * scale
-            sig1, sig2 = excerpt(reference, start1, length), distort(excerpt(reference, start2, length), rng)
+            sig1 = excerpt(reference, start1, length)
+            if both and not name.startswith("clock drift"):
+                sig1 = distort(sig1, rng)
+            sig2 = distort(excerpt(reference, start2, length), rng)
             truth, estimate = start2 - start1, estimate_shift(sig1, sig2)
             rows.append((truth, estimate, (estimate - truth) * 1000))
         results[name] = rows
     return results
 
 
+# ---------------------------------------------------------------- stress cases (not distortions of one recording)
+
+OVERLAPS_S = [10, 3, 1, 0.5]  # seconds of common content between the two excerpts
+LOOP_SECONDS = 4
+
+
+def periodic_reference(reference, exact):
+    """A recording that repeats every LOOP_SECONDS, like a drum loop. With exact=False every repetition gets
+    its own noise (SNR 10 dB), so the repetitions are similar but not identical."""
+    rng = np.random.default_rng(1)
+    loop = reference[: LOOP_SECONDS * SR]
+    repeats = int(np.ceil(len(reference) / len(loop)))
+    parts = [loop if exact else noise(10)(loop, rng) for _ in range(repeats)]
+    return np.concatenate(parts)[: len(reference)]
+
+
+def run_stress(reference, tolerance_ms=20.0, seed=0):
+    """Cases beyond a distorted copy: little common content, periodic material. Needs a reference >= 60 s."""
+    results = {}
+    if len(reference) / SR < 60:
+        return results
+    length = min(EXCERPT_SECONDS, 0.6 * len(reference) / SR)
+    clean = {"clean": DISTORTIONS["clean"]}
+    for overlap in OVERLAPS_S:
+        offsets = [(0, length - overlap), (length - overlap, 0)]
+        rows = run(reference, clean, offsets, tolerance_ms, seed, absolute=True)["clean"]
+        results[f"overlap {overlap:g} s of {length:.0f} s"] = rows
+    for exact, label in ((False, f"periodic ({LOOP_SECONDS} s loop, SNR 10 dB between repeats)"), (True, f"periodic (exact {LOOP_SECONDS} s loop)")):
+        results[label] = run(periodic_reference(reference, exact), clean, OFFSETS, tolerance_ms, seed)["clean"]
+    return results
+
+
+def run_all(reference, tolerance_ms=20.0, seed=0, both=True):
+    results = run(reference, tolerance_ms=tolerance_ms, seed=seed, both=both)
+    results.update(run_stress(reference, tolerance_ms, seed))
+    return results
+
+
+def statistics(results, tolerance_ms=20.0):
+    stats = {}
+    for name, rows in results.items():
+        errors = np.abs([r[2] for r in rows])
+        stats[name] = {"ok": int(np.sum(errors <= tolerance_ms)), "total": len(rows),
+                       "median_ms": round(float(np.median(errors)), 1), "max_ms": round(float(errors.max()))}
+    return stats
+
+
+def save_statistics(path, reference_name, duration, stats, tolerance_ms):
+    """Merges the results for one reference into a json file (read by the info dialog of the sync tool)."""
+    path = Path(path)
+    data = json.loads(path.read_text()) if path.exists() else {}
+    data["tolerance_ms"] = tolerance_ms
+    data.setdefault("references", {})[reference_name] = {"duration_s": round(duration, 1), "cases": stats}
+    path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+
+
 def summarize(results, tolerance_ms=20.0):
-    lines = [f"{'distortion':38} {'ok':>7} {'median |err|':>13} {'max |err|':>11}   (tolerance {tolerance_ms:g} ms)"]
+    lines = [f"{'case':45} {'ok':>7} {'median |err|':>13} {'max |err|':>11}   (tolerance {tolerance_ms:g} ms)"]
     for name, rows in results.items():
         errors = np.abs([r[2] for r in rows])
         ok = int(np.sum(errors <= tolerance_ms))
-        lines.append(f"{name:38} {ok:>3}/{len(rows):<3} {np.median(errors):>10.1f} ms {errors.max():>8.0f} ms")
+        lines.append(f"{name:45} {ok:>3}/{len(rows):<3} {np.median(errors):>10.1f} ms {errors.max():>8.0f} ms")
     return "\n".join(lines)
 
 
@@ -190,6 +257,8 @@ def main():
     parser.add_argument("--tolerance-ms", type=float, default=20.0)
     parser.add_argument("--reference", type=Path, default=REFERENCE, help="audio or video file to cut the excerpts from")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--one-sided", action="store_true", help="distort only the second excerpt (default: both)")
+    parser.add_argument("--save", type=Path, nargs="?", const=RESULTS_FILE, help=f"merge the statistics into a json file (default {RESULTS_FILE.name})")
     parser.add_argument("--details", action="store_true", help="print every failed case")
     args = parser.parse_args()
     if not shutil.which("ffmpeg"):
@@ -197,13 +266,16 @@ def main():
     reference = load_reference(args.reference)
     print(f"reference: {args.reference.name}, {len(reference) / SR:.1f} s")
     started = time.perf_counter()
-    results = run(reference, tolerance_ms=args.tolerance_ms, seed=args.seed)
+    results = run_all(reference, tolerance_ms=args.tolerance_ms, seed=args.seed, both=not args.one_sided)
     print(summarize(results, args.tolerance_ms))
     if args.details:
         for name, rows in results.items():
             for truth, estimate, error in rows:
                 if abs(error) > args.tolerance_ms:
                     print(f"  FAIL {name}: true {truth:+.4f} s, estimated {estimate:+.4f} s ({error:+.0f} ms)")
+    if args.save:
+        save_statistics(args.save, args.reference.name, len(reference) / SR, statistics(results, args.tolerance_ms), args.tolerance_ms)
+        print(f"saved to {args.save}")
     total = sum(len(rows) for rows in results.values())
     print(f"{total} cases in {time.perf_counter() - started:.0f} s")
 
