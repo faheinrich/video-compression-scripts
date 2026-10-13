@@ -13,7 +13,7 @@ from PySide6.QtGui import QImage
 from video_helper_tools.core.i18n import tr
 from .utils import (
     EXIFTOOL_CONFIG, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
-    get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
+    get_audio_streams, get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
 )
 
 class UnifiedScanWorker(QThread):
@@ -275,7 +275,16 @@ class ArchiveWorker(QThread):
                 filters.append("format=yuv420p")
             vf_chain = ",".join(filters)
 
-            ffmpeg_cmd = ["ffmpeg", "-y", "-i", str(src_path), "-vf", vf_chain]
+            # Keep EVERY audio stream: without -map ffmpeg takes only one, which loses the other tracks of recordings with
+            # separate tracks (e.g. game sound and voice). "V" skips cover art, "a?" does not fail without audio.
+            audio_streams = get_audio_streams(src_path)
+            ffmpeg_cmd = ["ffmpeg", "-y", "-i", str(src_path), "-vf", vf_chain,
+                          "-map", "0:V:0", "-map", "0:a?"]
+            # re-muxing drops the stream names of the recorder; write them back as handler name and title
+            for idx, (_codec, stream_name) in enumerate(audio_streams):
+                if stream_name:
+                    ffmpeg_cmd += [f"-metadata:s:a:{idx}", f"handler_name={stream_name}",
+                                   f"-metadata:s:a:{idx}", f"title={stream_name}"]
             if hdr:
                 ffmpeg_cmd += ["-color_primaries", hdr["color_primaries"], "-color_trc", hdr["color_trc"],
                                "-colorspace", hdr["colorspace"], "-profile:v", "main10"]
@@ -283,7 +292,7 @@ class ArchiveWorker(QThread):
             if self.settings.get('dry_run', False):
                 ffmpeg_cmd += ["-t", "1"]
             
-            if self.settings['copy_aac'] and src_audio == "aac":
+            if self.settings['copy_aac'] and audio_streams and all(c == "aac" for c, _ in audio_streams):
                 ffmpeg_cmd += ["-c:a", "copy"]
             else:
                 ffmpeg_cmd += ["-c:a", "aac", "-b:a", "128k"]

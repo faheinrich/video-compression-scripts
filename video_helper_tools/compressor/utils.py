@@ -122,6 +122,24 @@ def _probe(file_path):
     return info.get("format", {}), video, audio
 
 
+def get_audio_streams(file_path):
+    """(codec_name, name tag) for every audio stream, in file order; [] if unreadable or without audio.
+
+    The name tag is the stream name some recorders write (e.g. ``simple_aac_recording0``); it is not kept when a file is
+    re-muxed unless it is set again."""
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=codec_name:stream_tags=name",
+        "-of", "json", str(file_path)
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        streams = json.loads(result.stdout).get("streams", [])
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return []
+    return [(s.get("codec_name"), (s.get("tags") or {}).get("name")) for s in streams]
+
+
 # Codec/tag combinations Apple Photos imports (hev1-tagged HEVC is rejected).
 PHOTOS_VIDEO = {("hevc", "hvc1"), ("h264", "avc1")}
 PHOTOS_AUDIO = {"aac", "alac"}
