@@ -17,3 +17,6 @@ Workflow: clone the gitlab repos into here, let agents figure out the rest.
 
 - Maybe add a tool: Visual wrapper around rsync to sync folders (internal->harddrive) with a GUI.
   - "rsync -av --del --partial --progress --modify-window=1 --size-only  ~/Pictures/Fotos/ /Volumes/LaCie/Backups/Fotos"
+
+- For videos that are not compressed, the only way to view them is to open the original. The comparison viewer should be 
+  able to show the original without the compressed.

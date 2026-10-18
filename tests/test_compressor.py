@@ -620,3 +620,16 @@ def test_hdr_sources_stay_hdr(qapp, make_gui, tmp_path, renderer_index):
     sdr_format = video_format(sdr_out)
     assert sdr_format["profile"] == "Main" and sdr_format["pix_fmt"] == "yuv420p"
     assert "hdr" not in read_compression_settings([sdr_out])[str(sdr_out)]
+
+
+@pytest.mark.parametrize("width", [1100, 1280])
+def test_file_names_stay_visible_with_the_settings_drawer_open(make_gui, qapp, width):
+    # Regression: the fixed-width columns took ~850 px, leaving the file column a thumbnail-wide sliver.
+    from video_helper_tools.compressor.model import COL_FILE
+
+    gui = make_gui()
+    gui.resize(width, 760)
+    gui.show()
+    qapp.processEvents()
+    assert gui.drawer.isVisible()
+    assert gui.table.horizontalHeader().sectionSize(COL_FILE) >= 180
