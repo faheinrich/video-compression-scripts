@@ -12,7 +12,7 @@ from PySide6.QtGui import QImage
 
 from video_helper_tools.core.i18n import tr
 from .utils import (
-    EXIFTOOL_CONFIG, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
+    EXIFTOOL_CONFIG, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
     get_audio_streams, get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
 )
 
@@ -347,10 +347,12 @@ class ArchiveWorker(QThread):
                  "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
                  settings_tag_argument(self.settings_record(src_path)),
                  str(dst_path), "-overwrite_original", "-q"], check=True)
-            stat = src_path.stat()
-            os.utime(dst_path, (stat.st_atime, stat.st_mtime))
         except Exception as e:
             metadata_warning = tr(" ⚠️ (metadata could not be copied: {error})", error=e)
+        try:
+            copy_file_times(src_path, dst_path)
+        except OSError as e:
+            metadata_warning += tr(" ⚠️ (metadata could not be copied: {error})", error=e)
 
         try:
             src_size = src_path.stat().st_size

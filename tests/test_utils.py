@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from conftest import EXAMPLE_VIDEOS, requires_ffmpeg
@@ -75,3 +77,19 @@ def test_thumbnail_is_created_for_short_and_normal_clips(tmp_path, seconds):
     thumb = tmp_path / "thumb.jpg"
     assert generate_thumbnail(clip, thumb)
     assert thumb.stat().st_size > 0
+
+
+@pytest.mark.skipif(not hasattr(os.stat_result, "st_birthtime"), reason="creation time only on macOS")
+def test_copy_file_times_copies_creation_time(tmp_path):
+    from video_helper_tools.compressor.utils import copy_file_times
+
+    src, dst = tmp_path / "src.mov", tmp_path / "dst.mp4"
+    src.write_bytes(b"a")
+    old = 1_700_000_000  # November 2023
+    os.utime(src, (old, old))  # moves the creation time back, too
+    later = old + 86400 * 30
+    os.utime(src, (later, later))  # a later modification keeps the creation time
+    dst.write_bytes(b"b")
+    copy_file_times(src, dst)
+    assert int(dst.stat().st_birthtime) == int(src.stat().st_birthtime) == old
+    assert int(dst.stat().st_mtime) == later

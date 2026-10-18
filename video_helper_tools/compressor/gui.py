@@ -4,7 +4,7 @@ import shutil
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer, Slot
+from PySide6.QtCore import QEvent, QObject, Qt, QThreadPool, QTimer, Slot
 from PySide6.QtGui import QFontDatabase, QIntValidator, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
@@ -76,6 +76,20 @@ def nearest_existing(path):
         if candidate.exists():
             return candidate
     return None
+
+
+class ResizeWatcher(QObject):
+    """Calls a function whenever the watched widget changes its size."""
+
+    def __init__(self, widget, callback):
+        super().__init__(widget)
+        self.callback = callback
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize:
+            self.callback()
+        return False
 
 
 class JobsBox(QComboBox):
@@ -158,6 +172,20 @@ class ArchiverGUI(QWidget):
         self.check_system_dependencies()
 
     # ------------------------------------------------------------------ layout
+    FIXED_COLUMNS = {COL_DURATION: 80, COL_SIZE: 100, COL_RESULT: 150, COL_STATUS: 200}
+    SETTINGS_COLUMN_WIDTH, MIN_SETTINGS_COLUMN_WIDTH, MIN_FILE_COLUMN_WIDTH = 320, 100, 200
+
+    def fit_columns(self):
+        """The file name gets its room first; the settings column takes what is left and disappears when
+        that is too little. It comes back when the window gets wider or the settings drawer is closed."""
+        header = self.table.horizontalHeader()
+        spare = self.table.viewport().width() - sum(self.FIXED_COLUMNS.values()) - self.MIN_FILE_COLUMN_WIDTH
+        if spare < self.MIN_SETTINGS_COLUMN_WIDTH:
+            header.hideSection(COL_SETTINGS)
+        else:
+            header.showSection(COL_SETTINGS)
+            header.resizeSection(COL_SETTINGS, min(self.SETTINGS_COLUMN_WIDTH, spare))
+
     def init_ui(self):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -305,9 +333,11 @@ class ArchiverGUI(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(46)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(COL_FILE, QHeaderView.Stretch)
-        for col, width in ((COL_DURATION, 80), (COL_SIZE, 100), (COL_RESULT, 150), (COL_SETTINGS, 320), (COL_STATUS, 200)):
+        for col, width in self.FIXED_COLUMNS.items():
             header.setSectionResizeMode(col, QHeaderView.Interactive)
             header.resizeSection(col, width)
+        header.setSectionResizeMode(COL_SETTINGS, QHeaderView.Interactive)
+        self.column_watcher = ResizeWatcher(self.table.viewport(), self.fit_columns)
         header.setHighlightSections(False)
         self.table.setItemDelegateForColumn(COL_FILE, FileDelegate(self.model, self.table))
         self.table.setItemDelegateForColumn(COL_STATUS, StatusDelegate(self.table))

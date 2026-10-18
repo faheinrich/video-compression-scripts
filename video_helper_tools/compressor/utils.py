@@ -1,3 +1,4 @@
+import os
 import json
 import subprocess
 import re
@@ -285,3 +286,14 @@ def get_hdr_color(file_path):
         "color_primaries": video.get("color_primaries") or "bt2020",
         "colorspace": video.get("color_space") or "bt2020nc",
     }
+
+
+def copy_file_times(src_path, dst_path):
+    """Gives dst the access, modification and (on macOS) creation time of src. The Finder shows the
+    creation time, so without this a compressed copy looks as if it had been made today."""
+    stat = Path(src_path).stat()
+    birth = getattr(stat, "st_birthtime", None)
+    if birth is not None and birth < stat.st_mtime:
+        # macOS moves a file's creation time back whenever the modification time is set to an earlier moment.
+        os.utime(dst_path, (stat.st_atime, birth))
+    os.utime(dst_path, (stat.st_atime, stat.st_mtime))
