@@ -46,6 +46,11 @@ pythonpath = ["."]
 [tool.coverage.run]
 source = ["video_helper_tools"]
 branch = true
+omit = [
+    "*/compressor/main.py",                       # start scripts
+    "*/transcriber/run_minimal_whisper_server.py",
+    "*/core/audio_utils.py",                      # unused legacy helpers
+]
 
 [tool.coverage.report]
 show_missing = true
