@@ -16,7 +16,8 @@ from video_helper_tools.core.style import STYLE, caption
 RSYNC_ARGS = ["-av", "--del", "--partial", "--progress", "--modify-window=1", "--size-only"]
 
 # rsync output lines that are not file names.
-NON_FILE_PREFIXES = ("sending ", "building file list", "sent ", "total size", "deleting ", "rsync:", "created directory")
+NON_FILE_PREFIXES = ("sending ", "building file list", "sent ", "total size", "deleting ", "rsync:", "created directory",
+                     "Transfer starting")  # openrsync (macOS)
 PROGRESS_RE = re.compile(r"(\d+)%")
 
 
