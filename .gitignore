@@ -64,3 +64,7 @@ example_resources/*.mov
 coverage.xml
 htmlcov/
 .pytest_cache/
+
+# Transcriber output next to the example videos
+example_resources/*.eaf
+example_resources/*.wav
