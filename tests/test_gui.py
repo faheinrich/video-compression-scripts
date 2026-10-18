@@ -46,6 +46,25 @@ def test_compare_dialog_plays_both_videos(qapp):
     assert dialog.player_orig.source().isEmpty()
 
 
+def test_compare_dialog_plays_just_the_original(qapp):
+    from PySide6.QtMultimedia import QMediaPlayer
+    from video_helper_tools.compressor.widgets import CompareVideoDialog
+
+    dialog = CompareVideoDialog(EXAMPLE_VIDEOS[0])
+    dialog.show()
+    spin(2000)
+
+    assert dialog.player_comp is None and len(dialog.players()) == 1
+    assert dialog.player_orig.error() == QMediaPlayer.Error.NoError
+    assert dialog.player_orig.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+    dialog.toggle_play()
+    assert dialog.player_orig.playbackState() == QMediaPlayer.PlaybackState.PausedState
+    dialog.zoom_in()  # the zoom and reset controls work with one view
+    dialog.reset_views()
+    dialog.reject()
+    assert dialog.player_orig.source().isEmpty()
+
+
 @requires_ffmpeg
 def test_compare_dialog_shows_rotated_clip_upright(qapp, tmp_path):
     """Portrait phone clips carry a display matrix; Qt 6 applies it, the app must not rotate again."""

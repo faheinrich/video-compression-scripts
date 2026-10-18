@@ -113,11 +113,15 @@ class ZoomableVideoView(QGraphicsView):
 
 
 class CompareVideoDialog(QDialog):
-    def __init__(self, orig_path, comp_path, parent=None):
+    """Plays the original next to its compressed version; without comp_path it plays just the original."""
+
+    def __init__(self, orig_path, comp_path=None, parent=None):
         super().__init__(parent)
+        self.has_comp = comp_path is not None
         self.paths = {"orig": orig_path, "comp": comp_path}
         self.reported_errors = set()
-        self.setWindowTitle(tr("Compare: {name}", name=orig_path.name))
+        self.player_comp = self.view_comp = None
+        self.setWindowTitle(tr("Compare: {name}", name=orig_path.name) if self.has_comp else tr("Original: {name}", name=orig_path.name))
         
         self.setWindowState(Qt.WindowMaximized)
         
@@ -128,7 +132,7 @@ class CompareVideoDialog(QDialog):
         
         # Fetch Metadata
         w_o, h_o, fps_o = get_resolution_and_fps(orig_path)
-        w_c, h_c, fps_c = get_resolution_and_fps(comp_path)
+        w_c, h_c, fps_c = get_resolution_and_fps(comp_path) if self.has_comp else (None, None, None)
         
         orig_meta = f"{w_o}x{h_o} @ {fps_o} FPS" if w_o and h_o else tr("Unknown")
         comp_meta = f"{w_c}x{h_c} @ {fps_c} FPS" if w_c and h_c else tr("Unknown")
@@ -154,30 +158,31 @@ class CompareVideoDialog(QDialog):
         
         video_layout.addLayout(orig_container, stretch=1)
         
-        # Compressed Player
-        self.player_comp = QMediaPlayer(self)
-        self.audio_comp = QAudioOutput(self)
-        self.player_comp.setAudioOutput(self.audio_comp)
-        # One soundtrack: two slightly offset ones sound like an echo.
-        self.audio_comp.setMuted(True)
-        self.view_comp = ZoomableVideoView(self.player_comp, get_display_rotation(comp_path))
-        self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        if self.has_comp:
+            # Compressed Player
+            self.player_comp = QMediaPlayer(self)
+            self.audio_comp = QAudioOutput(self)
+            self.player_comp.setAudioOutput(self.audio_comp)
+            # One soundtrack: two slightly offset ones sound like an echo.
+            self.audio_comp.setMuted(True)
+            self.view_comp = ZoomableVideoView(self.player_comp, get_display_rotation(comp_path))
+            self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.player_comp.errorOccurred.connect(self.handle_player_error)
-        # No automatic rotation here: Qt 6 already applies the file's display matrix
-        # (e.g. portrait iPhone clips); rotating again would turn them sideways.
+            self.player_comp.errorOccurred.connect(self.handle_player_error)
+            # No automatic rotation here: Qt 6 already applies the file's display matrix
+            # (e.g. portrait iPhone clips); rotating again would turn them sideways.
 
-        comp_lbl = QLabel(tr("<b>Compressed (scroll to zoom, drag to pan)</b><br>{meta}", meta=comp_meta))
-        comp_lbl.setAlignment(Qt.AlignCenter)
-        comp_container = QVBoxLayout()
-        comp_container.addWidget(comp_lbl)
-        comp_container.addWidget(self.view_comp, stretch=1)
+            comp_lbl = QLabel(tr("<b>Compressed (scroll to zoom, drag to pan)</b><br>{meta}", meta=comp_meta))
+            comp_lbl.setAlignment(Qt.AlignCenter)
+            comp_container = QVBoxLayout()
+            comp_container.addWidget(comp_lbl)
+            comp_container.addWidget(self.view_comp, stretch=1)
         
-        self.btn_rotate_comp = QPushButton(tr("🔄 Rotate"))
-        self.btn_rotate_comp.clicked.connect(lambda: self.rotate_video(self.view_comp))
-        comp_container.addWidget(self.btn_rotate_comp)
+            self.btn_rotate_comp = QPushButton(tr("🔄 Rotate"))
+            self.btn_rotate_comp.clicked.connect(lambda: self.rotate_video(self.view_comp))
+            comp_container.addWidget(self.btn_rotate_comp)
         
-        video_layout.addLayout(comp_container, stretch=1)
+            video_layout.addLayout(comp_container, stretch=1)
         
         layout.addLayout(video_layout)
         
@@ -235,14 +240,14 @@ class CompareVideoDialog(QDialog):
         layout.addLayout(btn_layout)
         
         self.player_orig.setSource(QUrl.fromLocalFile(str(orig_path.resolve())))
-        self.player_comp.setSource(QUrl.fromLocalFile(str(comp_path.resolve())))
-        
-        self.view_orig.horizontalScrollBar().valueChanged.connect(self.view_comp.horizontalScrollBar().setValue)
-        self.view_comp.horizontalScrollBar().valueChanged.connect(self.view_orig.horizontalScrollBar().setValue)
-        self.view_orig.verticalScrollBar().valueChanged.connect(self.view_comp.verticalScrollBar().setValue)
-        self.view_comp.verticalScrollBar().valueChanged.connect(self.view_orig.verticalScrollBar().setValue)
         self.view_orig.zoom_changed.connect(self.on_view_zoom_changed)
-        self.view_comp.zoom_changed.connect(self.on_view_zoom_changed)
+        if self.has_comp:
+            self.player_comp.setSource(QUrl.fromLocalFile(str(comp_path.resolve())))
+            self.view_orig.horizontalScrollBar().valueChanged.connect(self.view_comp.horizontalScrollBar().setValue)
+            self.view_comp.horizontalScrollBar().valueChanged.connect(self.view_orig.horizontalScrollBar().setValue)
+            self.view_orig.verticalScrollBar().valueChanged.connect(self.view_comp.verticalScrollBar().setValue)
+            self.view_comp.verticalScrollBar().valueChanged.connect(self.view_orig.verticalScrollBar().setValue)
+            self.view_comp.zoom_changed.connect(self.on_view_zoom_changed)
 
         # Enter must not trigger whichever button happens to be the dialog default (it rotated the video).
         for button in self.findChildren(QPushButton):
@@ -257,7 +262,7 @@ class CompareVideoDialog(QDialog):
         self.sync_timer.timeout.connect(self.keep_in_sync)
         self.player_orig.durationChanged.connect(self.on_duration)
         # Start only once both files are loaded, otherwise the smaller one gets a head start.
-        for player in (self.player_orig, self.player_comp):
+        for player in self.players():
             player.mediaStatusChanged.connect(self.start_when_ready)
         self.start_when_ready()
 
@@ -265,6 +270,12 @@ class CompareVideoDialog(QDialog):
         # Otherwise QDialog might only hide/reject without closing immediately.
         self.setModal(True)
         
+    def players(self):
+        return [self.player_orig, self.player_comp] if self.has_comp else [self.player_orig]
+
+    def views(self):
+        return [self.view_orig, self.view_comp] if self.has_comp else [self.view_orig]
+
     def rotate_video(self, view):
         rot = view.video_item.rotation()
         # Set transform origin to center
@@ -274,8 +285,8 @@ class CompareVideoDialog(QDialog):
     
     def slider_zoom_changed(self, value):
         factor = value / 100.0
-        self.view_orig.set_zoom(factor)
-        self.view_comp.set_zoom(factor)
+        for view in self.views():
+            view.set_zoom(factor)
 
     def on_view_zoom_changed(self, factor):
         val = int(factor * 100)
@@ -285,9 +296,9 @@ class CompareVideoDialog(QDialog):
             self.slider_zoom.blockSignals(True)
             self.slider_zoom.setValue(val)
             self.slider_zoom.blockSignals(False)
-            self.view_orig.set_zoom(factor)
-            self.view_comp.set_zoom(factor)
-            
+            for view in self.views():
+                view.set_zoom(factor)
+
     def zoom_in(self):
         val = min(self.slider_zoom.value() + 20, 500)
         self.slider_zoom.setValue(val)
@@ -298,27 +309,29 @@ class CompareVideoDialog(QDialog):
         
     def reset_views(self):
         self.slider_zoom.setValue(100)
-        self.view_orig.reset_view()
-        self.view_comp.reset_view()
+        for view in self.views():
+            view.reset_view()
 
     def is_playing(self):
         return self.player_orig.playbackState() == QMediaPlayer.PlaybackState.PlayingState
 
     def start_when_ready(self, *_):
-        if not self.started and all(p.mediaStatus() in READY_STATUSES for p in (self.player_orig, self.player_comp)):
+        if not self.started and all(p.mediaStatus() in READY_STATUSES for p in self.players()):
             self.started = True
             self.play()
 
     def play(self):
-        self.player_comp.setPosition(self.player_orig.position())
-        self.player_orig.play()
-        self.player_comp.play()
+        if self.has_comp:
+            self.player_comp.setPosition(self.player_orig.position())
+        for player in self.players():
+            player.play()
         self.sync_timer.start()
 
     def pause(self):
-        self.player_orig.pause()
-        self.player_comp.pause()
-        self.player_comp.setPosition(self.player_orig.position())  # show the same frame
+        for player in self.players():
+            player.pause()
+        if self.has_comp:
+            self.player_comp.setPosition(self.player_orig.position())  # show the same frame
         self.update_timeline()
 
     def toggle_play(self):
@@ -332,7 +345,7 @@ class CompareVideoDialog(QDialog):
         self.play()
 
     def seek(self, ms):
-        for player in (self.player_orig, self.player_comp):
+        for player in self.players():
             player.setPosition(ms)
         self.update_timeline(ms)
 
@@ -340,8 +353,8 @@ class CompareVideoDialog(QDialog):
         self.scrubbing = True
         self.resume_after_scrub = self.is_playing()
         if self.resume_after_scrub:
-            self.player_orig.pause()
-            self.player_comp.pause()
+            for player in self.players():
+                player.pause()
 
     def scrub_end(self):
         self.scrubbing = False
@@ -351,7 +364,7 @@ class CompareVideoDialog(QDialog):
 
     def keep_in_sync(self):
         master = self.player_orig.position()
-        if self.is_playing() and abs(self.player_comp.position() - master) > SYNC_TOLERANCE_MS:
+        if self.has_comp and self.is_playing() and abs(self.player_comp.position() - master) > SYNC_TOLERANCE_MS:
             self.player_comp.setPosition(master)
         if not self.scrubbing:
             self.update_timeline(master)

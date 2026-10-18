@@ -74,6 +74,7 @@ class TitleBar(QWidget):
             QToolButton:pressed { background: rgba(128, 128, 128, 0.38); }
         """)
         self.title = QLabel()
+        self.title.setAttribute(Qt.WA_TransparentForMouseEvents)  # drag and double-click go to the bar
         self.title.setStyleSheet("font-weight: 600;")
         self.back.setFixedHeight(26)
         layout.addWidget(self.back, 0, Qt.AlignVCenter)

@@ -314,6 +314,8 @@ GERMAN = {
         'Benchmark-Ergebnisse',
     'Run it yourself: python -m video_helper_tools.sync.benchmark':
         'Selbst ausführen: python -m video_helper_tools.sync.benchmark',
+    'Play original': 'Original abspielen',
+    'Original: {name}': 'Original: {name}',
     'Start sync': 'Sync starten',
     'Stop sync': 'Sync stoppen',
     'Select source folder': 'Quellordner auswählen',

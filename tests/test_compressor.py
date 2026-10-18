@@ -577,6 +577,15 @@ def test_compare_is_locked_while_the_result_is_being_rewritten(archived_row):
     assert not menu_texts(gui.build_row_menu(row))["Vergleichen"]
 
 
+def test_original_can_be_played_without_a_result(make_gui, tmp_path):
+    from video_helper_tools.compressor.model import VideoRow
+
+    gui = make_gui()
+    row = VideoRow(src=EXAMPLE_VIDEOS[0], dst=tmp_path / "missing_archived.mp4", size=1)
+    texts = menu_texts(gui.build_row_menu(row))
+    assert texts["Original abspielen"] and "Vergleichen" not in texts
+
+
 def make_hlg_clip(path):
     """Like iPhone HDR: HEVC Main 10, BT.2020, HLG."""
     subprocess.run(
