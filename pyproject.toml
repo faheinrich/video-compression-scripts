@@ -55,3 +55,12 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
+
+# Linux: the default torch wheel pulls in CUDA (several GB); the app only needs the CPU build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

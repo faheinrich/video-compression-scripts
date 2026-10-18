@@ -314,7 +314,7 @@ class ArchiveWorker(QThread):
             ffmpeg_cmd.append(str(dst_path))
             
             env = os.environ.copy()
-            env["FFREPORT"] = "file=/dev/null:level=32"
+            env["FFREPORT"] = f"file={os.devnull}:level=32"
             
             p_ffmpeg = subprocess.Popen(
                 ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0, env=env,
