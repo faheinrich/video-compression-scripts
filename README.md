@@ -4,6 +4,9 @@
 
 # Video Helper Tools
 
+[![Tests](https://github.com/faheinrich/video-compression-scripts/actions/workflows/tests.yml/badge.svg)](https://github.com/faheinrich/video-compression-scripts/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/faheinrich/video-compression-scripts/graph/badge.svg)](https://codecov.io/gh/faheinrich/video-compression-scripts)
+
 Video Helper Tools is a unified suite of desktop and command-line utilities for working with videos and audio.
 It combines three workflows into one project:
 
