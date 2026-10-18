@@ -58,3 +58,9 @@ thumbnails/
 # uv virtual environment
 .venv/
 example_resources/*.mov
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
