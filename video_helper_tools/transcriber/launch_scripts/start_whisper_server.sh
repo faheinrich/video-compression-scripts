@@ -1,5 +1,4 @@
 #!/bin/bash
-
-. ~/miniconda3/etc/profile.d/conda.sh
-conda activate oc
-python repos/whisper-server/run_minimal_whisper_server.py --url localhost
+# Starts the Whisper server from the repository's uv environment.
+cd "$(dirname "$0")/../../.." || exit 1
+uv run run-whisper-server --url localhost

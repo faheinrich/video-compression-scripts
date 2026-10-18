@@ -8,18 +8,7 @@ from fastapi import FastAPI
 from transformers import pipeline
 from transformers.utils import is_flash_attn_2_available
 
-from pydantic import BaseModel
-from typing import List
-
-DEFAULT_SERVER_URL = "127.0.0.1"
-DEFAULT_SERVER_PORT = 8080
-
-class TranscriptionRequest(BaseModel):
-    signal: List[float]
-    audio_rate: int
-
-class TranscriptionResult(BaseModel):
-    transcription_text: str
+from .protocol import DEFAULT_SERVER_URL, DEFAULT_SERVER_PORT, TranscriptionRequest, TranscriptionResult
 
 app = FastAPI()
 

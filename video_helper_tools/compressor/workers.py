@@ -5,15 +5,20 @@ import time
 import signal
 import sys
 import re
+import threading
 from pathlib import Path
-from PyQt5.QtCore import QThread, pyqtSignal, QRunnable, QObject
-from PyQt5.QtGui import QPixmap
+from PySide6.QtCore import QThread, Signal, QRunnable, QObject
+from PySide6.QtGui import QImage
 
-from .utils import get_video_info, parse_ffmpeg_time, format_size, get_thumbnail_path, generate_thumbnail
+from video_helper_tools.core.i18n import tr
+from .utils import (
+    EXIFTOOL_CONFIG, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
+    get_audio_streams, get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
+)
 
 class UnifiedScanWorker(QThread):
-    file_found = pyqtSignal(dict)
-    scan_finished = pyqtSignal(list)
+    file_found = Signal(dict)
+    scan_finished = Signal(list)
     
     def __init__(self, src_dir, dst_dir, flatten=False, sort_by="name_asc"):
         super().__init__()
@@ -89,33 +94,74 @@ class UnifiedScanWorker(QThread):
 
 
 class ArchiveWorker(QThread):
-    progress_step = pyqtSignal(int, str)
+    progress_step = Signal(int, str)
 
     # Pfad-basierte Signale für eindeutige Identifizierung bei doppelten Dateinamen
-    status_update_path = pyqtSignal(str, str, str, dict)
-    file_duration_discovered_path = pyqtSignal(str, float)
-    file_progress_path = pyqtSignal(str, int)
-    ffmpeg_log_line_path = pyqtSignal(str, str)
+    status_update_path = Signal(str, str, str, dict)
+    file_duration_discovered_path = Signal(str, float)
+    file_progress_path = Signal(str, int)
+    ffmpeg_log_line_path = Signal(str, str)
     
-    finished_all = pyqtSignal()
+    finished_all = Signal()
     
     def __init__(self, src_dir, dst_dir, max_jobs, video_data_list, settings):
         super().__init__()
         self.src_dir = Path(src_dir)
         self.dst_dir = Path(dst_dir)
         self.max_jobs = max_jobs
-        self.video_data_list = video_data_list
         self.is_running = True
         self.settings = settings
         self.active_processes = []
-    
+        # The GUI may reorder the remaining queue while running (set_queue), hence the lock.
+        self.queue_lock = threading.Lock()
+        self.queue = list(video_data_list)
+        self.started = set()
+        self.hdr_sources = set()
+
+    def settings_record(self, src_path=None):
+        """What gets stored in the result file (see utils.SETTINGS_TAG)."""
+        s = self.settings
+        record = {
+            "version": 1,
+            "encoder": s.get('renderer'),
+            "max_res": s.get('max_res') if s.get('limit_res') else None,
+            "max_fps": s.get('max_fps') if s.get('limit_fps') else None,
+            "copy_aac": bool(s.get('copy_aac')),
+            "dry_run": bool(s.get('dry_run')),
+        }
+        if s.get('renderer') == "libx265":
+            record.update(crf=s.get('crf'), preset=s.get('preset'))
+        else:
+            record.update(vt_quality=s.get('vt_quality'))
+        if src_path is not None and str(src_path) in self.hdr_sources:
+            record["hdr"] = True
+        return record
+
+    def set_queue(self, items):
+        """Replace the videos still waiting; ones already started are never queued again."""
+        with self.queue_lock:
+            self.queue = [item for item in items if str(item['path']) not in self.started]
+
+    def next_item(self):
+        with self.queue_lock:
+            if not self.queue:
+                return None
+            item = self.queue.pop(0)
+            self.started.add(str(item['path']))
+            return item
+
+    def has_queue(self):
+        with self.queue_lock:
+            return bool(self.queue)
+
     def run(self):
-        queue = list(self.video_data_list)
         count = 0
-        
-        while (queue or self.active_processes) and self.is_running:
-            while len(self.active_processes) < self.max_jobs and queue and self.is_running:
-                file_info = queue.pop(0)
+
+        while (self.has_queue() or self.active_processes) and self.is_running:
+            while len(self.active_processes) < self.max_jobs and self.is_running:
+                file_info = self.next_item()
+                if file_info is None:
+                    break
                 src_path = file_info['path']
                 dst_path = file_info['dst_path']
                 
@@ -170,13 +216,14 @@ class ArchiveWorker(QThread):
                 poll = p_ffmpeg.poll()
                 if poll is not None:
                     count += 1
-                    self.ffmpeg_log_line_path.emit(str(src_path), "\n[INFO] Kopiere Metadaten & Exif-Tags...")
+                    self.ffmpeg_log_line_path.emit(str(src_path), tr("\n[INFO] Copying metadata & EXIF tags..."))
                     success_msg, data_dict = self.finalize_video_process(p_ffmpeg, src_path, dst_path)
                     status_str = "finished" if "✅" in success_msg else "error"
-                    reason_str = "" if status_str == "finished" else "FFmpeg Fehler"
+                    reason_str = "" if status_str == "finished" else tr("FFmpeg error")
 
                     self.file_progress_path.emit(str(src_path), 100)
                     self.status_update_path.emit(str(src_path), status_str, reason_str, data_dict)
+                    self.ffmpeg_log_line_path.emit(str(src_path), success_msg)
                     self.progress_step.emit(count, success_msg)
                 else:
                     still_active.append((p_ffmpeg, src_path, dst_path, total_dur, unread_buffer))
@@ -202,9 +249,9 @@ class ArchiveWorker(QThread):
                         'ratio': (dst_size / src_size) * 100 if src_size > 0 else 100.0
                     }
                     if abs(src_dur - dst_dur) < 0.8:
-                        return None, "Bereits vorhanden", f"⏭️ SKIP: {src_path.name}", skip_data
+                        return None, tr("Already exists"), f"⏭️ SKIP: {src_path.name}", skip_data
                     else:
-                        return None, "Länge weicht ab", f"⚠️ SKIP: {src_path.name} (Länge weicht ab!)", {}
+                        return None, tr("Duration differs"), f"⚠️ SKIP: {src_path.name}", {}
             
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             
@@ -218,20 +265,39 @@ class ArchiveWorker(QThread):
             if self.settings['limit_fps'] and src_fps and src_fps > self.settings['max_fps']:
                 filters.append(f"fps=fps={self.settings['max_fps']}")
             
-            filters.append("format=yuv420p")
+            # HDR stays HDR: 10-bit HEVC (Main 10) with the source's colour tags. SDR stays 8-bit.
+            hdr = get_hdr_color(src_path)
+            libx265 = self.settings['renderer'] == "libx265"
+            if hdr:
+                self.hdr_sources.add(str(src_path))
+                filters.append("format=yuv420p10le" if libx265 else "format=p010le")
+            else:
+                filters.append("format=yuv420p")
             vf_chain = ",".join(filters)
-            
-            ffmpeg_cmd = ["ffmpeg", "-y", "-i", str(src_path), "-vf", vf_chain]
+
+            # Keep EVERY audio stream: without -map ffmpeg takes only one, which loses the other tracks of recordings with
+            # separate tracks (e.g. game sound and voice). "V" skips cover art, "a?" does not fail without audio.
+            audio_streams = get_audio_streams(src_path)
+            ffmpeg_cmd = ["ffmpeg", "-y", "-i", str(src_path), "-vf", vf_chain,
+                          "-map", "0:V:0", "-map", "0:a?"]
+            # re-muxing drops the stream names of the recorder; write them back as handler name and title
+            for idx, (_codec, stream_name) in enumerate(audio_streams):
+                if stream_name:
+                    ffmpeg_cmd += [f"-metadata:s:a:{idx}", f"handler_name={stream_name}",
+                                   f"-metadata:s:a:{idx}", f"title={stream_name}"]
+            if hdr:
+                ffmpeg_cmd += ["-color_primaries", hdr["color_primaries"], "-color_trc", hdr["color_trc"],
+                               "-colorspace", hdr["colorspace"], "-profile:v", "main10"]
             
             if self.settings.get('dry_run', False):
                 ffmpeg_cmd += ["-t", "1"]
             
-            if self.settings['copy_aac'] and src_audio == "aac":
+            if self.settings['copy_aac'] and audio_streams and all(c == "aac" for c, _ in audio_streams):
                 ffmpeg_cmd += ["-c:a", "copy"]
             else:
                 ffmpeg_cmd += ["-c:a", "aac", "-b:a", "128k"]
             
-            if self.settings['renderer'] == "Software (CPU - libx265)":
+            if libx265:
                 ffmpeg_cmd += [
                     "-c:v", "libx265",
                     "-crf", str(self.settings['crf']),
@@ -263,44 +329,55 @@ class ArchiveWorker(QThread):
             return p_ffmpeg, None, None, {}
         
         except Exception as e:
-            return None, "Start Fehler", f"❌ FEHLER bei Start von {src_path.name}: {str(e)}", {}
+            return None, tr("Start error"), tr("❌ Could not start {name}: {error}", name=src_path.name, error=e), {}
     
     def finalize_video_process(self, p_ffmpeg, src_path, dst_path):
         data_dict = {}
         if p_ffmpeg.returncode != 0:
             if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
-            return f"❌ FEHLER bei {src_path.name}: FFmpeg Returncode {p_ffmpeg.returncode}", data_dict
+            return tr("❌ Error in {name}: FFmpeg exit code {code}", name=src_path.name, code=p_ffmpeg.returncode), data_dict
 
         # Metadata copy is best-effort: a failure here (e.g. exotic tags, missing
         # exiftool) must not throw away an otherwise successfully compressed video.
         metadata_warning = ""
         try:
+            # -config must come first; the settings tag goes after the copy so it is not overwritten.
             subprocess.run(
-                ["exiftool", "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
+                ["exiftool", "-config", str(EXIFTOOL_CONFIG),
+                 "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
+                 settings_tag_argument(self.settings_record(src_path)),
                  str(dst_path), "-overwrite_original", "-q"], check=True)
-            stat = src_path.stat()
-            os.utime(dst_path, (stat.st_atime, stat.st_mtime))
         except Exception as e:
-            metadata_warning = f" ⚠️ (Metadaten konnten nicht kopiert werden: {e})"
+            metadata_warning = tr(" ⚠️ (metadata could not be copied: {error})", error=e)
+        try:
+            copy_file_times(src_path, dst_path)
+        except OSError as e:
+            metadata_warning += tr(" ⚠️ (metadata could not be copied: {error})", error=e)
 
         try:
             src_size = src_path.stat().st_size
             dst_size = dst_path.stat().st_size
         except OSError as e:
             if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
-            return f"❌ FEHLER bei Nachbearbeitung von {src_path.name}: {str(e)}", data_dict
+            return tr("❌ Post-processing failed for {name}: {error}", name=src_path.name, error=e), data_dict
 
         diff_size = src_size - dst_size
         ratio = (dst_size / src_size) * 100 if src_size > 0 else 100.0
 
-        data_dict = {'src_size': src_size, 'dst_size': dst_size, 'diff_size': diff_size, 'ratio': ratio}
+        data_dict = {'src_size': src_size, 'dst_size': dst_size, 'diff_size': diff_size, 'ratio': ratio,
+                     'settings': None if metadata_warning else self.settings_record(src_path)}
         result_msg = f"✅ FINISH: {src_path.name} | {format_size(src_size)} -> {format_size(dst_size)} ({ratio:.1f}%){metadata_warning}"
 
         if dst_size >= src_size:
-            rel_path = src_path.relative_to(self.src_dir)
-            backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
-            shutil.copy2(src_path, backup_path)
-            result_msg += " ⚠️ (Original kopiert)"
+            # Only keep the smaller original if it imports into Apple Photos; otherwise
+            # the (always hvc1/AAC) compressed file stays the archive copy.
+            if is_photos_compatible(src_path):
+                rel_path = src_path.relative_to(self.src_dir)
+                backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
+                shutil.copy2(src_path, backup_path)
+                result_msg += tr(" ⚠️ (original copied because it is smaller)")
+            else:
+                result_msg += tr(" ⚠️ (original not Apple Photos compatible, kept the compressed version)")
 
         return result_msg, data_dict
     
@@ -321,8 +398,8 @@ class ArchiveWorker(QThread):
 
 
 class CompareScanWorker(QThread):
-    pair_found = pyqtSignal(dict)
-    scan_finished = pyqtSignal(list)
+    pair_found = Signal(dict)
+    scan_finished = Signal(list)
     
     def __init__(self, orig_dir, comp_dir, sort_by="name_asc"):
         super().__init__()
@@ -436,25 +513,67 @@ class CompareScanWorker(QThread):
         self.scan_finished.emit(pairs)
 
 class ThumbnailSignals(QObject):
-    finished = pyqtSignal(object)
+    # QImage, not QPixmap: pixmaps may only be created on the GUI thread.
+    finished = Signal(str, object)
+
 
 class ThumbnailRunnable(QRunnable):
+    """Connect `signals.finished` to a method of a long-lived QObject, never to a lambda:
+    a lambda is invoked via this short-lived signals object, which the pool may already
+    have freed when the queued call is delivered (crash in Shiboken::cppPointer)."""
+
     def __init__(self, video_path):
         super().__init__()
         self.video_path = video_path
         self.signals = ThumbnailSignals()
 
     def run(self):
+        image = None
         try:
             thumb_path = get_thumbnail_path(self.video_path)
             if not thumb_path.exists():
                 generate_thumbnail(self.video_path, thumb_path)
-
             if thumb_path.exists():
-                pixmap = QPixmap(str(thumb_path))
-                self.signals.finished.emit(pixmap)
-            else:
-                self.signals.finished.emit(None)
+                image = QImage(str(thumb_path))
         except Exception as e:
             print(f"Error generating thumbnail for {self.video_path}: {e}")
-            self.signals.finished.emit(None)
+        try:
+            self.signals.finished.emit(str(self.video_path), image)
+        except RuntimeError:  # the window was closed while this job was still running
+            pass
+
+
+class DurationProbeWorker(QThread):
+    """Fills in video durations after a scan so the table and ETA have them before archiving."""
+    duration_found = Signal(str, float)
+
+    def __init__(self, paths):
+        super().__init__()
+        self.paths = list(paths)
+        self._stopped = False
+
+    def stop(self):
+        self._stopped = True
+
+    def run(self):
+        for path in self.paths:
+            if self._stopped:
+                return
+            duration, _, _ = get_video_info(path)
+            if duration:
+                self.duration_found.emit(str(path), duration)
+
+
+class ResultSettingsWorker(QThread):
+    """Reads the stored compression settings of existing results after a scan."""
+    settings_found = Signal(str, object)  # source path, settings dict
+
+    def __init__(self, pairs):
+        super().__init__()
+        self.pairs = list(pairs)  # (source path, result path)
+
+    def run(self):
+        found = read_compression_settings([dst for _, dst in self.pairs])
+        for src, dst in self.pairs:
+            if str(dst) in found:
+                self.settings_found.emit(str(src), found[str(dst)])

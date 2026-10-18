@@ -1,0 +1,697 @@
+{
+ "tolerance_ms": 20.0,
+ "references": {
+  "longer-test-audio.flac": {
+   "duration_s": 63.5,
+   "cases": {
+    "clean": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "gain -30 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "inverted polarity": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 20 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -15 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -25 dB": {
+     "ok": 2,
+     "total": 13,
+     "median_ms": 3523.5,
+     "max_ms": 24307
+    },
+    "noise SNR -35 dB": {
+     "ok": 0,
+     "total": 13,
+     "median_ms": 3523.5,
+     "max_ms": 24307
+    },
+    "noise SNR -45 dB": {
+     "ok": 0,
+     "total": 13,
+     "median_ms": 3523.5,
+     "max_ms": 24307
+    },
+    "lowpass 3 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "lowpass 500 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 300 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 2 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "telephone 8 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "hard clipping": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "8-bit quantization": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "50 Hz hum + harmonics": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "reverb RT60 0.4 s": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 7.1,
+     "max_ms": 19
+    },
+    "reverb RT60 1.5 s": {
+     "ok": 5,
+     "total": 13,
+     "median_ms": 32.7,
+     "max_ms": 76
+    },
+    "AAC 24 kbps": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "clock drift 100 ppm": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 2.0,
+     "max_ms": 2
+    },
+    "clock drift 1000 ppm": {
+     "ok": 11,
+     "total": 13,
+     "median_ms": 12.3,
+     "max_ms": 21
+    },
+    "clock drift 5000 ppm": {
+     "ok": 1,
+     "total": 13,
+     "median_ms": 97.0,
+     "max_ms": 119
+    },
+    "lowpass 3 kHz + noise 5 dB + reverb": {
+     "ok": 12,
+     "total": 13,
+     "median_ms": 3.5,
+     "max_ms": 27
+    },
+    "overlap 10 s of 38 s": {
+     "ok": 2,
+     "total": 2,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "overlap 3 s of 38 s": {
+     "ok": 2,
+     "total": 2,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "overlap 1 s of 38 s": {
+     "ok": 0,
+     "total": 2,
+     "median_ms": 39689.7,
+     "max_ms": 39690
+    },
+    "overlap 0.5 s of 38 s": {
+     "ok": 0,
+     "total": 2,
+     "median_ms": 39689.7,
+     "max_ms": 39690
+    },
+    "periodic (4 s loop, SNR 10 dB between repeats)": {
+     "ok": 8,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 20000
+    },
+    "periodic (exact 4 s loop)": {
+     "ok": 7,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 20000
+    }
+   }
+  },
+  "wilson-address-1913.ogg": {
+   "duration_s": 104.0,
+   "cases": {
+    "clean": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "gain -30 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "inverted polarity": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 20 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -15 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.1,
+     "max_ms": 0
+    },
+    "noise SNR -25 dB": {
+     "ok": 2,
+     "total": 13,
+     "median_ms": 3154.9,
+     "max_ms": 14432
+    },
+    "noise SNR -35 dB": {
+     "ok": 0,
+     "total": 13,
+     "median_ms": 5413.9,
+     "max_ms": 14432
+    },
+    "noise SNR -45 dB": {
+     "ok": 0,
+     "total": 13,
+     "median_ms": 5413.9,
+     "max_ms": 16658
+    },
+    "lowpass 3 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "lowpass 500 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 300 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 2 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "telephone 8 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "hard clipping": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "8-bit quantization": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "50 Hz hum + harmonics": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "reverb RT60 0.4 s": {
+     "ok": 10,
+     "total": 13,
+     "median_ms": 10.0,
+     "max_ms": 36
+    },
+    "reverb RT60 1.5 s": {
+     "ok": 4,
+     "total": 13,
+     "median_ms": 44.0,
+     "max_ms": 124
+    },
+    "AAC 24 kbps": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "clock drift 100 ppm": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 1.0,
+     "max_ms": 8
+    },
+    "clock drift 1000 ppm": {
+     "ok": 11,
+     "total": 13,
+     "median_ms": 1.4,
+     "max_ms": 29
+    },
+    "clock drift 5000 ppm": {
+     "ok": 8,
+     "total": 13,
+     "median_ms": 17.2,
+     "max_ms": 171
+    },
+    "lowpass 3 kHz + noise 5 dB + reverb": {
+     "ok": 11,
+     "total": 13,
+     "median_ms": 3.6,
+     "max_ms": 50
+    },
+    "overlap 10 s of 40 s": {
+     "ok": 2,
+     "total": 2,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "overlap 3 s of 40 s": {
+     "ok": 2,
+     "total": 2,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "overlap 1 s of 40 s": {
+     "ok": 0,
+     "total": 2,
+     "median_ms": 30292.7,
+     "max_ms": 30293
+    },
+    "overlap 0.5 s of 40 s": {
+     "ok": 0,
+     "total": 2,
+     "median_ms": 30292.7,
+     "max_ms": 30293
+    },
+    "periodic (4 s loop, SNR 10 dB between repeats)": {
+     "ok": 8,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 20000
+    },
+    "periodic (exact 4 s loop)": {
+     "ok": 7,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 20000
+    }
+   }
+  },
+  "video1.mp4": {
+   "duration_s": 26.9,
+   "cases": {
+    "clean": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "gain -30 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "inverted polarity": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 20 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -15 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -25 dB": {
+     "ok": 1,
+     "total": 13,
+     "median_ms": 2038.9,
+     "max_ms": 8893
+    },
+    "noise SNR -35 dB": {
+     "ok": 1,
+     "total": 13,
+     "median_ms": 1768.7,
+     "max_ms": 8893
+    },
+    "noise SNR -45 dB": {
+     "ok": 1,
+     "total": 13,
+     "median_ms": 1768.7,
+     "max_ms": 8893
+    },
+    "lowpass 3 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "lowpass 500 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 300 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 2 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "telephone 8 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "hard clipping": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "8-bit quantization": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "50 Hz hum + harmonics": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "reverb RT60 0.4 s": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 3.6,
+     "max_ms": 14
+    },
+    "reverb RT60 1.5 s": {
+     "ok": 3,
+     "total": 13,
+     "median_ms": 43.0,
+     "max_ms": 121
+    },
+    "AAC 24 kbps": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "clock drift 100 ppm": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.8,
+     "max_ms": 1
+    },
+    "clock drift 1000 ppm": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 6.8,
+     "max_ms": 13
+    },
+    "clock drift 5000 ppm": {
+     "ok": 9,
+     "total": 13,
+     "median_ms": 16.0,
+     "max_ms": 55
+    },
+    "lowpass 3 kHz + noise 5 dB + reverb": {
+     "ok": 12,
+     "total": 13,
+     "median_ms": 6.8,
+     "max_ms": 37
+    }
+   }
+  },
+  "video2.mp4": {
+   "duration_s": 24.4,
+   "cases": {
+    "clean": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "gain -30 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "inverted polarity": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 20 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR 5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -5 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "noise SNR -15 dB": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.1,
+     "max_ms": 0
+    },
+    "noise SNR -25 dB": {
+     "ok": 0,
+     "total": 13,
+     "median_ms": 2122.0,
+     "max_ms": 8813
+    },
+    "noise SNR -35 dB": {
+     "ok": 0,
+     "total": 13,
+     "median_ms": 1216.3,
+     "max_ms": 8813
+    },
+    "noise SNR -45 dB": {
+     "ok": 0,
+     "total": 13,
+     "median_ms": 1216.3,
+     "max_ms": 8813
+    },
+    "lowpass 3 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "lowpass 500 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 300 Hz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "highpass 2 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "telephone 8 kHz": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "hard clipping": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "8-bit quantization": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "50 Hz hum + harmonics": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "reverb RT60 0.4 s": {
+     "ok": 12,
+     "total": 13,
+     "median_ms": 10.1,
+     "max_ms": 23
+    },
+    "reverb RT60 1.5 s": {
+     "ok": 4,
+     "total": 13,
+     "median_ms": 24.0,
+     "max_ms": 105
+    },
+    "AAC 24 kbps": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.0,
+     "max_ms": 0
+    },
+    "clock drift 100 ppm": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 0.5,
+     "max_ms": 1
+    },
+    "clock drift 1000 ppm": {
+     "ok": 13,
+     "total": 13,
+     "median_ms": 10.4,
+     "max_ms": 14
+    },
+    "clock drift 5000 ppm": {
+     "ok": 1,
+     "total": 13,
+     "median_ms": 44.7,
+     "max_ms": 53
+    },
+    "lowpass 3 kHz + noise 5 dB + reverb": {
+     "ok": 12,
+     "total": 13,
+     "median_ms": 4.1,
+     "max_ms": 21
+    }
+   }
+  }
+ }
+}

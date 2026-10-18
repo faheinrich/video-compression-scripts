@@ -1,25 +1,28 @@
-try:
-    import i18n
-
-    _ = getattr(i18n, "tr", lambda text: text)
-except ImportError:
-    def _(text):
-        return text
-from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, 
-    QPushButton, QTextEdit, QLineEdit, QDialog, QSlider, QStyle,
-    QGraphicsView, QGraphicsScene, QMessageBox
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QDialog, QSlider,
+    QGraphicsView, QGraphicsScene, QMessageBox, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QUrl, QSizeF, pyqtSignal, QThread, QObject, QThreadPool
-from PyQt5.QtGui import QIcon, QPixmap
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtMultimediaWidgets import QVideoWidget, QGraphicsVideoItem
+from PySide6.QtCore import Qt, QPointF, QRectF, QUrl, QSizeF, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
-from .utils import (
-    format_size, format_duration, open_in_finder, get_resolution_and_fps, 
-    get_video_rotation, get_thumbnail_path, generate_thumbnail
-)
-from .workers import ThumbnailRunnable
+from video_helper_tools.core.i18n import tr
+from .utils import describe_streams, get_display_rotation, get_resolution_and_fps
+
+# The compressed file decodes faster than e.g. a 4K original, so the players drift apart;
+# the original is the master clock and the compressed player is pulled back beyond this.
+SYNC_TOLERANCE_MS = 120
+READY_STATUSES = (QMediaPlayer.MediaStatus.LoadedMedia, QMediaPlayer.MediaStatus.BufferedMedia,
+                  QMediaPlayer.MediaStatus.BufferingMedia)
+
+
+def format_clock(ms):
+    seconds = max(0, ms) // 1000
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
 
 class DropLineEdit(QLineEdit):
     def __init__(self, *args, **kwargs):
@@ -42,189 +45,20 @@ class DropLineEdit(QLineEdit):
             super().dropEvent(event)
 
 
-class VideoItemWidget(QWidget):
-    def __init__(self, filename, initial_size, src_path, dst_path, index=None, parent=None):
-        super().__init__(parent)
-        self.filename = filename
-        self.src_path = src_path
-        self.dst_path = dst_path
-        self.initial_size_str = format_size(initial_size) if initial_size else "0 B"
-        self.duration_str = "--:--"
-        self.log_visible = False
-        
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(8, 6, 8, 6)
-        
-        self.top_widget = QWidget()
-        top_layout = QHBoxLayout(self.top_widget)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.lbl_thumbnail = QLabel()
-        self.lbl_thumbnail.setFixedSize(60, 40)
-        self.lbl_thumbnail.setStyleSheet("background-color: #ddd; border: 1px solid #ccc;")
-        top_layout.addWidget(self.lbl_thumbnail, stretch=0)
-        
-        display_name = f"{index}. {filename}" if index is not None else filename
-        self.lbl_name = QLabel(display_name)
-        self.lbl_name.setStyleSheet("font-weight: bold;")
-        top_layout.addWidget(self.lbl_name, stretch=3)
-        
-        self.lbl_stats = QLabel(f"⏱️ {self.duration_str}  |  📂 {self.initial_size_str}")
-        self.lbl_stats.setStyleSheet("color: #555; font-size: 11px;")
-        top_layout.addWidget(self.lbl_stats, stretch=3)
-        
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.setTextVisible(True)
-        self.progress.setAlignment(Qt.AlignCenter)
-        self.progress.setFixedHeight(16)
-        self.progress.setStyleSheet("""
-            QProgressBar { border: 1px solid #bbb; border-radius: 4px; background: #e0e0e0; text-align: center; font-size: 10px; font-weight: bold;}
-            QProgressBar::chunk { background-color: #2bc4d9; border-radius: 3px; }
-        """)
-        self.progress.hide()
-        top_layout.addWidget(self.progress, stretch=2)
-        
-        self.lbl_details = QLabel("")
-        self.lbl_details.setStyleSheet("color: #7f8c8d; font-style: italic; font-size: 11px;")
-        self.lbl_details.hide()
-        top_layout.addWidget(self.lbl_details, stretch=1)
-        
-        self.btn_find_orig = QPushButton("🔍 Orig")
-        self.btn_find_orig.setFixedWidth(55)
-        self.btn_find_orig.setStyleSheet("font-size: 10px; padding: 2px;")
-        self.btn_find_orig.clicked.connect(lambda: open_in_finder(self.src_path))
-        top_layout.addWidget(self.btn_find_orig)
-        
-        self.btn_find_res = QPushButton("🔍 Result")
-        self.btn_find_res.setFixedWidth(65)
-        self.btn_find_res.setStyleSheet("font-size: 10px; padding: 2px;")
-        self.btn_find_res.setEnabled(False)
-        self.btn_find_res.clicked.connect(lambda: open_in_finder(self.dst_path))
-        top_layout.addWidget(self.btn_find_res)
-        
-        self.lbl_status = QLabel(_("Planned"))
-        self.lbl_status.setAlignment(Qt.AlignCenter)
-        self.lbl_status.setFixedWidth(90)
-        self.set_status_style("planned")
-        top_layout.addWidget(self.lbl_status)
-        
-        self.main_layout.addWidget(self.top_widget)
-        
-        # Load thumbnail in background
-        self.load_thumbnail(src_path)
-        
-        self.txt_log = QTextEdit()
-        self.txt_log.setReadOnly(True)
-        self.txt_log.setFixedHeight(120)
-        self.txt_log.setStyleSheet("""
-            background-color: #2c3e50; color: #ecf0f1;
-            font-family: 'Courier New', Courier, monospace; font-size: 10px;
-            border: 1px solid #34495e; border-radius: 4px; margin-top: 4px;
-        """)
-        self.txt_log.hide()
-        self.main_layout.addWidget(self.txt_log)
-    
-    def append_log(self, text):
-        self.txt_log.append(text)
-        if self.txt_log.document().blockCount() > 200:
-            cursor = self.txt_log.textCursor()
-            cursor.movePosition(cursor.Start)
-            cursor.select(cursor.BlockUnderCursor)
-            cursor.removeSelectedText()
-            cursor.deleteChar()
-        self.txt_log.ensureCursorVisible()
-    
-    def toggle_log(self):
-        self.log_visible = not self.log_visible
-        self.txt_log.setVisible(self.log_visible)
-        return self.log_visible
-    
-    def update_duration(self, duration):
-        self.duration_str = format_duration(duration)
-        self.lbl_stats.setText(f"{self.duration_str}  |  📂 {self.initial_size_str}")
-    
-    def set_status_style(self, status, detail_text="", extra_data=None):
-        status = status.lower()
-        if detail_text and status != "running":
-            self.lbl_details.setText(detail_text)
-            self.lbl_details.show()
-        else:
-            self.lbl_details.hide()
-        
-        if extra_data and (status == "finished" or status == "skipped"):
-            dst_size_str = format_size(extra_data.get('dst_size', 0))
-            ratio = extra_data.get('ratio', 100.0)
-            saved_size_str = format_size(extra_data.get('diff_size', 0))
-            
-            self.lbl_stats.setText(
-                f"{self.duration_str}  |  📂 {self.initial_size_str} ➜ {dst_size_str} "
-                f"({ratio:.1f}%)  |  💰 Gespart: {saved_size_str}"
-            )
-            if status == "finished":
-                color = "#d35400" if extra_data.get('diff_size', 0) < 0 else "#27ae60"
-                self.lbl_stats.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 500;")
-                self.btn_find_res.setEnabled(True)
-            else:
-                self.lbl_stats.setStyleSheet("color: #2980b9; font-size: 11px; font-style: italic;")
-                if status == "skipped" and extra_data.get('dst_size', 0) > 0:
-                    self.btn_find_res.setEnabled(True)
-        
-        if status == "planned":
-            self.lbl_status.setText(_("⏳ Planned"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #7f8c8d; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-            self.progress.hide()
-        elif status == "running":
-            if detail_text:
-                self.lbl_status.setText(f"⚡ Läuft ({detail_text})")
-            else:
-                self.lbl_status.setText(_("⚡ Running"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #f1c40f; color: black; border-radius: 4px; padding: 3px; font-size: 11px; font-weight: bold;")
-            self.progress.show()
-        elif status == "finished":
-            self.lbl_status.setText(_("✅ Finished"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-            self.progress.hide()
-        elif status == "error":
-            self.lbl_status.setText(_("❌ Error"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #e74c3c; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-            self.progress.hide()
-        elif status == "skipped":
-            self.lbl_status.setText(_("⏭️ Skipped"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #34495e; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-            self.progress.hide()
-    
-    def set_progress(self, value):
-        self.progress.setValue(value)
-
-    def load_thumbnail(self, video_path):
-        worker = ThumbnailRunnable(video_path)
-        worker.signals.finished.connect(self.on_thumbnail_loaded)
-        QThreadPool.globalInstance().start(worker)
-
-    def on_thumbnail_loaded(self, pixmap):
-        if pixmap:
-            self.lbl_thumbnail.setPixmap(pixmap)
-            self.lbl_thumbnail.setStyleSheet("background-color: transparent; border: 1px solid #ccc;")
-
-
-from PyQt5.QtWidgets import QSizePolicy
-
 class ZoomableVideoView(QGraphicsView):
-    zoom_changed = pyqtSignal(float)
+    zoom_changed = Signal(float)
 
-    def __init__(self, player, parent=None):
+    def __init__(self, player, rotation=0, parent=None):
         super().__init__(parent)
+        self.rotation = rotation
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
         
         self.video_item = QGraphicsVideoItem()
+        # The item gets exactly the displayed aspect (see videoSizeChanged). Letting Qt fit the
+        # frame itself uses the unrotated size for rotated clips: squashed picture and
+        # never-repainted bands outside that area.
+        self.video_item.setAspectRatioMode(Qt.IgnoreAspectRatio)
         self.scene.addItem(self.video_item)
         player.setVideoOutput(self.video_item)
         
@@ -238,10 +72,24 @@ class ZoomableVideoView(QGraphicsView):
         self.zoom_step = 1.15
 
     def videoSizeChanged(self, size):
+        # nativeSize is the stored (unrotated) size, but Qt draws the frame rotated by the
+        # file's display matrix; with a landscape box a portrait clip would be drawn tiny.
+        if self.rotation % 180 == 90:
+            size = QSizeF(size.height(), size.width())
         self.video_item.setSize(QSizeF(size))
-        self.setSceneRect(self.video_item.boundingRect())
-        self.fitInView(self.video_item, Qt.KeepAspectRatio)
+        self.setSceneRect(self.frame_rect())
+        self.fitInView(self.frame_rect(), Qt.KeepAspectRatio)
         self.zoom_factor = 1.0
+
+    def frame_rect(self):
+        # Not boundingRect(): for rotated clips Qt computes it from the unrotated native
+        # size, while the frame is drawn into the item's full size.
+        return QRectF(self.video_item.pos(), self.video_item.size())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if abs(self.zoom_factor - 1.0) < 0.001 and not self.video_item.size().isEmpty():
+            self.fitInView(self.frame_rect(), Qt.KeepAspectRatio)
 
     def wheelEvent(self, event):
         if event.angleDelta().y() > 0:
@@ -259,7 +107,7 @@ class ZoomableVideoView(QGraphicsView):
             self.zoom_factor = factor
 
     def reset_view(self):
-        self.fitInView(self.video_item, Qt.KeepAspectRatio)
+        self.fitInView(self.frame_rect(), Qt.KeepAspectRatio)
         self.zoom_factor = 1.0
         self.zoom_changed.emit(1.0)
 
@@ -267,7 +115,9 @@ class ZoomableVideoView(QGraphicsView):
 class CompareVideoDialog(QDialog):
     def __init__(self, orig_path, comp_path, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Vergleich: {orig_path.name}")
+        self.paths = {"orig": orig_path, "comp": comp_path}
+        self.reported_errors = set()
+        self.setWindowTitle(tr("Compare: {name}", name=orig_path.name))
         
         self.setWindowState(Qt.WindowMaximized)
         
@@ -280,48 +130,50 @@ class CompareVideoDialog(QDialog):
         w_o, h_o, fps_o = get_resolution_and_fps(orig_path)
         w_c, h_c, fps_c = get_resolution_and_fps(comp_path)
         
-        orig_meta = f"{w_o}x{h_o} @ {fps_o} FPS" if w_o and h_o else "Unbekannt"
-        comp_meta = f"{w_c}x{h_c} @ {fps_c} FPS" if w_c and h_c else "Unbekannt"
+        orig_meta = f"{w_o}x{h_o} @ {fps_o} FPS" if w_o and h_o else tr("Unknown")
+        comp_meta = f"{w_c}x{h_c} @ {fps_c} FPS" if w_c and h_c else tr("Unknown")
         
         # Original Player
-        self.player_orig = QMediaPlayer()
-        self.view_orig = ZoomableVideoView(self.player_orig)
+        self.player_orig = QMediaPlayer(self)
+        self.audio_orig = QAudioOutput(self)
+        self.player_orig.setAudioOutput(self.audio_orig)
+        self.view_orig = ZoomableVideoView(self.player_orig, get_display_rotation(orig_path))
         self.view_orig.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        self.player_orig.error.connect(self.handle_player_error)
 
-        orig_lbl = QLabel(f"<b>Original (Mausrad für Zoom, Klicken für Verschieben)</b><br>{orig_meta}")
+        self.player_orig.errorOccurred.connect(self.handle_player_error)
+
+        orig_lbl = QLabel(tr("<b>Original (scroll to zoom, drag to pan)</b><br>{meta}", meta=orig_meta))
         orig_lbl.setAlignment(Qt.AlignCenter)
         orig_container = QVBoxLayout()
         orig_container.addWidget(orig_lbl)
         orig_container.addWidget(self.view_orig, stretch=1)
         
-        self.btn_rotate_orig = QPushButton("🔄 Rotieren")
+        self.btn_rotate_orig = QPushButton(tr("🔄 Rotate"))
         self.btn_rotate_orig.clicked.connect(lambda: self.rotate_video(self.view_orig))
         orig_container.addWidget(self.btn_rotate_orig)
         
         video_layout.addLayout(orig_container, stretch=1)
         
         # Compressed Player
-        self.player_comp = QMediaPlayer()
-        self.view_comp = ZoomableVideoView(self.player_comp)
+        self.player_comp = QMediaPlayer(self)
+        self.audio_comp = QAudioOutput(self)
+        self.player_comp.setAudioOutput(self.audio_comp)
+        # One soundtrack: two slightly offset ones sound like an echo.
+        self.audio_comp.setMuted(True)
+        self.view_comp = ZoomableVideoView(self.player_comp, get_display_rotation(comp_path))
         self.view_comp.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        self.player_comp.error.connect(self.handle_player_error)
 
-        # Apply rotation
-        rot_orig = get_video_rotation(orig_path)
-        rot_comp = get_video_rotation(comp_path)
-        self.view_orig.video_item.setRotation(rot_orig)
-        self.view_comp.video_item.setRotation(rot_comp)
-        
-        comp_lbl = QLabel(f"<b>Komprimiert (Mausrad für Zoom, Klicken für Verschieben)</b><br>{comp_meta}")
+        self.player_comp.errorOccurred.connect(self.handle_player_error)
+        # No automatic rotation here: Qt 6 already applies the file's display matrix
+        # (e.g. portrait iPhone clips); rotating again would turn them sideways.
+
+        comp_lbl = QLabel(tr("<b>Compressed (scroll to zoom, drag to pan)</b><br>{meta}", meta=comp_meta))
         comp_lbl.setAlignment(Qt.AlignCenter)
         comp_container = QVBoxLayout()
         comp_container.addWidget(comp_lbl)
         comp_container.addWidget(self.view_comp, stretch=1)
         
-        self.btn_rotate_comp = QPushButton("🔄 Rotieren")
+        self.btn_rotate_comp = QPushButton(tr("🔄 Rotate"))
         self.btn_rotate_comp.clicked.connect(lambda: self.rotate_video(self.view_comp))
         comp_container.addWidget(self.btn_rotate_comp)
         
@@ -329,8 +181,24 @@ class CompareVideoDialog(QDialog):
         
         layout.addLayout(video_layout)
         
+        # Timeline: scrubbing seeks both players to the same position.
+        position_row = QHBoxLayout()
+        self.slider_pos = QSlider(Qt.Horizontal)
+        self.slider_pos.setRange(0, 0)
+        self.slider_pos.setPageStep(5000)
+        self.slider_pos.valueChanged.connect(self.seek)  # programmatic updates block signals
+        self.slider_pos.sliderPressed.connect(self.scrub_start)
+        self.slider_pos.sliderReleased.connect(self.scrub_end)
+        self.lbl_time = QLabel("0:00 / 0:00")
+        position_row.addWidget(self.slider_pos, stretch=1)
+        position_row.addWidget(self.lbl_time)
+        layout.addLayout(position_row)
+
         btn_layout = QHBoxLayout()
-        self.btn_play = QPushButton("▶️ Play / ⏸️ Pause")
+        self.btn_restart = QPushButton(tr("⏮ From the start"))
+        self.btn_restart.clicked.connect(self.restart)
+        self.btn_play = QPushButton(tr("▶️ Play / ⏸️ Pause"))
+        self.btn_play.setToolTip(tr("Space bar"))
         self.btn_play.clicked.connect(self.toggle_play)
         
         # Zoom Controls
@@ -348,12 +216,13 @@ class CompareVideoDialog(QDialog):
         self.btn_zoom_in.setFixedWidth(40)
         self.btn_zoom_in.clicked.connect(self.zoom_in)
         
-        self.btn_reset = QPushButton("🔄 Ansicht zurücksetzen")
+        self.btn_reset = QPushButton(tr("🔄 Reset view"))
         self.btn_reset.clicked.connect(self.reset_views)
         
-        self.btn_close = QPushButton("❌ Schließen")
+        self.btn_close = QPushButton(tr("Close"))
         self.btn_close.clicked.connect(self.close)
         
+        btn_layout.addWidget(self.btn_restart)
         btn_layout.addWidget(self.btn_play)
         btn_layout.addStretch()
         btn_layout.addWidget(QLabel("Zoom:"))
@@ -365,8 +234,8 @@ class CompareVideoDialog(QDialog):
         btn_layout.addWidget(self.btn_close)
         layout.addLayout(btn_layout)
         
-        self.player_orig.setMedia(QMediaContent(QUrl.fromLocalFile(str(orig_path.resolve()))))
-        self.player_comp.setMedia(QMediaContent(QUrl.fromLocalFile(str(comp_path.resolve()))))
+        self.player_orig.setSource(QUrl.fromLocalFile(str(orig_path.resolve())))
+        self.player_comp.setSource(QUrl.fromLocalFile(str(comp_path.resolve())))
         
         self.view_orig.horizontalScrollBar().valueChanged.connect(self.view_comp.horizontalScrollBar().setValue)
         self.view_comp.horizontalScrollBar().valueChanged.connect(self.view_orig.horizontalScrollBar().setValue)
@@ -375,8 +244,22 @@ class CompareVideoDialog(QDialog):
         self.view_orig.zoom_changed.connect(self.on_view_zoom_changed)
         self.view_comp.zoom_changed.connect(self.on_view_zoom_changed)
 
-        self.player_orig.play()
-        self.player_comp.play()
+        # Enter must not trigger whichever button happens to be the dialog default (it rotated the video).
+        for button in self.findChildren(QPushButton):
+            button.setAutoDefault(False)
+            button.setDefault(False)
+        QShortcut(QKeySequence(Qt.Key_Space), self, activated=self.toggle_play)
+
+        self.scrubbing = False
+        self.resume_after_scrub = False
+        self.started = False
+        self.sync_timer = QTimer(self, interval=200)
+        self.sync_timer.timeout.connect(self.keep_in_sync)
+        self.player_orig.durationChanged.connect(self.on_duration)
+        # Start only once both files are loaded, otherwise the smaller one gets a head start.
+        for player in (self.player_orig, self.player_comp):
+            player.mediaStatusChanged.connect(self.start_when_ready)
+        self.start_when_ready()
 
         # Ensure keyboard shortcuts like ESC always lead to proper cleanup.
         # Otherwise QDialog might only hide/reject without closing immediately.
@@ -385,7 +268,7 @@ class CompareVideoDialog(QDialog):
     def rotate_video(self, view):
         rot = view.video_item.rotation()
         # Set transform origin to center
-        rect = view.video_item.boundingRect()
+        rect = QRectF(QPointF(0, 0), view.video_item.size())
         view.video_item.setTransformOriginPoint(rect.center())
         view.video_item.setRotation(rot + 90)
     
@@ -418,30 +301,100 @@ class CompareVideoDialog(QDialog):
         self.view_orig.reset_view()
         self.view_comp.reset_view()
 
+    def is_playing(self):
+        return self.player_orig.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+
+    def start_when_ready(self, *_):
+        if not self.started and all(p.mediaStatus() in READY_STATUSES for p in (self.player_orig, self.player_comp)):
+            self.started = True
+            self.play()
+
+    def play(self):
+        self.player_comp.setPosition(self.player_orig.position())
+        self.player_orig.play()
+        self.player_comp.play()
+        self.sync_timer.start()
+
+    def pause(self):
+        self.player_orig.pause()
+        self.player_comp.pause()
+        self.player_comp.setPosition(self.player_orig.position())  # show the same frame
+        self.update_timeline()
+
     def toggle_play(self):
-        if self.player_orig.state() == QMediaPlayer.PlayingState:
+        if self.is_playing():
+            self.pause()
+        else:
+            self.play()
+
+    def restart(self):
+        self.seek(0)
+        self.play()
+
+    def seek(self, ms):
+        for player in (self.player_orig, self.player_comp):
+            player.setPosition(ms)
+        self.update_timeline(ms)
+
+    def scrub_start(self):
+        self.scrubbing = True
+        self.resume_after_scrub = self.is_playing()
+        if self.resume_after_scrub:
             self.player_orig.pause()
             self.player_comp.pause()
-        else:
-            self.player_orig.play()
-            self.player_comp.play()
-            
-    def handle_player_error(self, error):
-        if error != QMediaPlayer.NoError:
-            msg = self.sender().errorString()
-            QMessageBox.critical(self, "Video Fehler", f"Konnte Video nicht laden: {msg}")
-            
+
+    def scrub_end(self):
+        self.scrubbing = False
+        self.seek(self.slider_pos.value())
+        if self.resume_after_scrub:
+            self.play()
+
+    def keep_in_sync(self):
+        master = self.player_orig.position()
+        if self.is_playing() and abs(self.player_comp.position() - master) > SYNC_TOLERANCE_MS:
+            self.player_comp.setPosition(master)
+        if not self.scrubbing:
+            self.update_timeline(master)
+
+    def update_timeline(self, position=None):
+        position = self.player_orig.position() if position is None else position
+        if not self.scrubbing:
+            self.slider_pos.blockSignals(True)
+            self.slider_pos.setValue(position)
+            self.slider_pos.blockSignals(False)
+        self.lbl_time.setText(f"{format_clock(position)} / {format_clock(self.player_orig.duration())}")
+
+    def on_duration(self, duration):
+        self.slider_pos.setRange(0, duration)
+        self.update_timeline()
+
+    def handle_player_error(self, error, error_string=""):
+        if error == QMediaPlayer.Error.NoError:
+            return
+        side = "orig" if self.sender() is self.player_orig else "comp"
+        if side in self.reported_errors:  # one message per side, not one per failed attempt
+            return
+        self.reported_errors.add(side)
+        path = self.paths[side]
+        QMessageBox.critical(self, tr("Video error"), tr(
+            "The {side} could not be played: {error}\n\nFile: {name}\nFormat: {format}",
+            side=tr("original") if side == "orig" else tr("compressed version"),
+            error=error_string or tr("unknown error"), name=path.name,
+            format=describe_streams(path) or tr("could not be read")))
+
     def cleanup_players(self):
+        try:
+            self.sync_timer.stop()
+        except (AttributeError, RuntimeError):  # not created yet, or already freed (__del__)
+            pass
         for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
             if player is None:
                 continue
             try:
-                if player.state() == QMediaPlayer.PlayingState:
-                    player.pause()
                 player.stop()
-                player.setMedia(QMediaContent())
+                player.setSource(QUrl())
                 player.setVideoOutput(None)
-            except Exception:
+            except (RuntimeError, AttributeError):
                 pass
 
     def closeEvent(self, event):
@@ -457,195 +410,4 @@ class CompareVideoDialog(QDialog):
         super().accept()
 
     def __del__(self):
-        # Extra safety: destructor can help in edge cases where closeEvent
-        # was not reached for some reason.
-        try:
-            for player in (getattr(self, "player_orig", None), getattr(self, "player_comp", None)):
-                if player is None:
-                    continue
-                if player.state() == QMediaPlayer.PlayingState:
-                    player.pause()
-                player.stop()
-                player.setMedia(QMediaContent())
-                player.setVideoOutput(None)
-        except Exception:
-            pass
-
-
-class CompareItemWidget(QWidget):
-    def __init__(self, orig_path, comp_path, orig_size, comp_size, index=None, parent=None):
-        super().__init__(parent)
-        self.orig_path = orig_path
-        self.comp_path = comp_path
-        self.duration_str = "--:--"
-        self.log_visible = False
-        
-        self.orig_size = orig_size
-        self.comp_size = comp_size
-        
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(8, 6, 8, 6)
-        
-        # File info row
-        info_layout = QHBoxLayout()
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.lbl_thumbnail = QLabel()
-        self.lbl_thumbnail.setFixedSize(60, 40)
-        self.lbl_thumbnail.setStyleSheet("background-color: #ddd; border: 1px solid #ccc;")
-        info_layout.addWidget(self.lbl_thumbnail, stretch=0)
-        
-        self.filename = orig_path.name if orig_path else comp_path.name
-        display_name = f"{index}. {self.filename}" if index is not None else self.filename
-        self.lbl_name = QLabel(display_name)
-        self.lbl_name.setStyleSheet("font-weight: bold; font-size: 12px;")
-        info_layout.addWidget(self.lbl_name, stretch=3)
-        
-        self.lbl_stats = QLabel(self._get_stats_text())
-        self.lbl_stats.setStyleSheet("color: #555; font-size: 11px;")
-        info_layout.addWidget(self.lbl_stats, stretch=4)
-        
-        self.btn_find_orig = QPushButton("🔍 Orig")
-        self.btn_find_orig.setFixedWidth(55)
-        self.btn_find_orig.setStyleSheet("font-size: 10px; padding: 2px;")
-        if orig_path:
-            self.btn_find_orig.clicked.connect(lambda: open_in_finder(self.orig_path))
-        else:
-            self.btn_find_orig.setEnabled(False)
-        info_layout.addWidget(self.btn_find_orig)
-        
-        self.btn_find_comp = QPushButton("🔍 Komp")
-        self.btn_find_comp.setFixedWidth(55)
-        self.btn_find_comp.setStyleSheet("font-size: 10px; padding: 2px;")
-        if comp_path:
-            self.btn_find_comp.clicked.connect(lambda: open_in_finder(self.comp_path))
-        else:
-            self.btn_find_comp.setEnabled(False)
-        info_layout.addWidget(self.btn_find_comp)
-        
-        self.lbl_status = QLabel("✅ Finished")
-        self.lbl_status.setAlignment(Qt.AlignCenter)
-        self.lbl_status.setFixedWidth(90)
-        self.lbl_status.setStyleSheet("background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-        info_layout.addWidget(self.lbl_status)
-        
-        self.main_layout.addLayout(info_layout)
-        
-        # Load thumbnail in background
-        self.load_thumbnail(orig_path or comp_path)
-        
-        # Actions row
-        actions_layout = QHBoxLayout()
-        actions_layout.setContentsMargins(0, 4, 0, 0)
-        
-        self.btn_play = QPushButton("▶️ Videos ansehen")
-        self.btn_play.setStyleSheet("""
-            QPushButton { background-color: #27ae60; color: white; font-size: 10px; font-weight: bold; }
-            QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
-        """)
-        
-        self.btn_overwrite = QPushButton("⚠️ Mit Komp. überschreiben")
-        self.btn_overwrite.setStyleSheet("""
-            QPushButton { background-color: #f39c12; color: white; font-size: 10px; font-weight: bold; }
-            QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
-        """)
-        
-        self.btn_swap = QPushButton("🔄 Tauschen")
-        self.btn_swap.setStyleSheet("""
-            QPushButton { background-color: #3498db; color: white; font-size: 10px; font-weight: bold; }
-            QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
-        """)
-        
-        self.btn_del_orig = QPushButton("🗑️ Original löschen")
-        self.btn_del_orig.setStyleSheet("""
-            QPushButton { background-color: #e74c3c; color: white; font-size: 10px; font-weight: bold; }
-            QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
-        """)
-        
-        self.btn_del_comp = QPushButton("🗑️ Komp. löschen")
-        self.btn_del_comp.setStyleSheet("""
-            QPushButton { background-color: #95a5a6; color: white; font-size: 10px; font-weight: bold; }
-            QPushButton:disabled { background-color: #bdc3c7; color: #7f8c8d; }
-        """)
-        
-        # Disable buttons if one file is missing
-        if not orig_path or not comp_path:
-            self.btn_overwrite.setEnabled(False)
-            self.btn_swap.setEnabled(False)
-        if not orig_path:
-            self.btn_del_orig.setEnabled(False)
-        if not orig_path or not comp_path:
-            self.btn_play.setEnabled(False)
-        if not comp_path:
-            self.btn_del_comp.setEnabled(False)
-            
-        actions_layout.addWidget(self.btn_play)
-        actions_layout.addWidget(self.btn_overwrite)
-        actions_layout.addWidget(self.btn_swap)
-        actions_layout.addWidget(self.btn_del_orig)
-        actions_layout.addWidget(self.btn_del_comp)
-        actions_layout.addStretch()
-        
-        self.main_layout.addLayout(actions_layout)
-
-    def load_thumbnail(self, video_path):
-        worker = ThumbnailRunnable(video_path)
-        worker.signals.finished.connect(self.on_thumbnail_loaded)
-        QThreadPool.globalInstance().start(worker)
-
-    def on_thumbnail_loaded(self, pixmap):
-        if pixmap:
-            self.lbl_thumbnail.setPixmap(pixmap)
-            self.lbl_thumbnail.setStyleSheet("background-color: transparent; border: 1px solid #ccc;")
-
-    def _get_stats_text(self):
-        orig_size_str = format_size(self.orig_size) if self.orig_size else "N/A"
-        comp_size_str = format_size(self.comp_size) if self.comp_size else "N/A"
-        
-        ratio_str = ""
-        if self.orig_size and self.comp_size and self.orig_size > 0:
-            ratio = (self.comp_size / self.orig_size) * 100
-            diff = self.orig_size - self.comp_size
-            ratio_str = f" ({ratio:.1f}%) | Ersparnis: {format_size(diff)}"
-            
-        return f"⏱️ {self.duration_str}  |  Original: {orig_size_str}  ➜  Komprimiert: {comp_size_str}{ratio_str}"
-
-    def update_duration(self, duration):
-        self.duration_str = format_duration(duration)
-        self.lbl_stats.setText(self._get_stats_text())
-
-    def set_status_style(self, status, detail_text="", extra_data=None):
-        status = status.lower()
-        if status == "planned":
-            self.lbl_status.setText(_("⏳ Planned"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #7f8c8d; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-        elif status == "running":
-            if detail_text:
-                self.lbl_status.setText(f"⚡ Läuft ({detail_text})")
-            else:
-                self.lbl_status.setText(_("⚡ Running"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #f1c40f; color: black; border-radius: 4px; padding: 3px; font-size: 11px; font-weight: bold;")
-        elif status == "finished":
-            self.lbl_status.setText(_("✅ Finished"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #2ecc71; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-            if extra_data and 'dst_size' in extra_data:
-                self.comp_size = extra_data['dst_size']
-                self.lbl_stats.setText(self._get_stats_text())
-        elif status == "error":
-            self.lbl_status.setText(_("❌ Error"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #e74c3c; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-        elif status == "skipped":
-            self.lbl_status.setText(_("⏭️ Skipped"))
-            self.lbl_status.setStyleSheet(
-                "background-color: #34495e; color: white; border-radius: 4px; padding: 3px; font-size: 11px;")
-
-    def set_action_handler(self, handler):
-        self.btn_play.clicked.connect(lambda: handler("play", self))
-        self.btn_overwrite.clicked.connect(lambda: handler("overwrite", self))
-        self.btn_swap.clicked.connect(lambda: handler("swap", self))
-        self.btn_del_orig.clicked.connect(lambda: handler("del_orig", self))
-        self.btn_del_comp.clicked.connect(lambda: handler("del_comp", self))
+        self.cleanup_players()

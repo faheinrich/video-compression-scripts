@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 from matplotlib import pyplot as plt
 import shutil
+from scipy.fft import next_fast_len
 
 from . import PROJECT_ROOT_DIR
 
@@ -42,15 +43,15 @@ def convert_audio_for_whisper(audio_input_path: Path):
 
 def extract_audio_tracks(video_path: Path, audio_output_path: Path | None = None):
     """
-    Extracts all audio tracks from a video file using ffmpeg and saves them as separate files in aac format.
+    Extracts all audio tracks from a video file using ffmpeg and saves the first one as a mono 16 kHz wav file.
     FIXME WARNING: How to extract all audio tracks? Currently only extracts the first audio track. This may be
      (very) important when dealing with screen recordings (i.e. created in OBS), which may have more audio tracks.
     :param video_path: Path to the video file from which to extract audio.
     :param audio_output_path: Path where the extracted audio file will be saved.
-        If None, it will be saved in the same directory as the video file with ".aac" suffix.
+        If None, it will be saved in the same directory as the video file with ".wav" suffix.
     """
     if audio_output_path is None:
-        audio_output_path = video_path.with_suffix(".aac")
+        audio_output_path = video_path.with_suffix(".wav")
     subprocess.run(
         [
             "ffmpeg",
@@ -58,8 +59,14 @@ def extract_audio_tracks(video_path: Path, audio_output_path: Path | None = None
             str(video_path),
             "-map",
             f"0:a:0",  # Extract the first audio track only, todo how to do all? stereo, mono, etc.
+            # Decode to mono 16 kHz PCM: libsndfile (librosa) cannot read raw AAC streams, and 16 kHz is
+            # all the shift calculation and the waveform display need.
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
             "-c:a",
-            "copy",
+            "pcm_s16le",
             str(audio_output_path),
             "-y",
             "-loglevel",
@@ -78,73 +85,36 @@ def calculate_shift_fft(signal1: npt.NDArray[float], signal2: npt.NDArray[float]
     :param plot: If True, plots the original signals and the cross-correlation.
     :return: The calculated shift in samples between the two signals.
     """
-    # Compute the FFT of both signals
-    # NOTE: np.fft.fft returns an array of the same length as the input.
-    # If signal lengths differ, the cross-spectrum multiplication below will
-    # fail unless we explicitly pad/truncate to the same length.
-    n1 = int(len(signal1))
-    n2 = int(len(signal2))
-    print(
-        "[calculate_shift_fft] signal lengths:",
-        n1,
-        n2,
-        "dtypes:",
-        getattr(signal1, "dtype", None),
-        getattr(signal2, "dtype", None),
-        "shapes:",
-        getattr(signal1, "shape", None),
-        getattr(signal2, "shape", None),
-    )
+    n1 = len(signal1)
+    n2 = len(signal2)
 
-    if n1 != n2:
-        # To compute cross-correlation via FFT we need a common FFT length.
-        # Use max length and zero-pad the shorter signal.
-        n = max(n1, n2)
-        if n1 < n:
-            signal1 = np.pad(signal1, (0, n - n1))
-        if n2 < n:
-            signal2 = np.pad(signal2, (0, n - n2))
-        print(
-            "[calculate_shift_fft] padded signals to common length:",
-            n,
-            "(n1 was",
-            n1,
-            ", n2 was",
-            n2,
-            ")",
-        )
+    # Linear (not circular) cross-correlation: zero-pad to at least n1 + n2 - 1 samples, otherwise a shift larger
+    # than half the signal length wraps around and is reported with the wrong sign.
+    n_fft = next_fast_len(n1 + n2 - 1)
+    cross_correlation = np.fft.irfft(np.fft.rfft(signal1, n_fft) * np.conj(np.fft.rfft(signal2, n_fft)), n_fft)
 
-    fft_signal1 = np.fft.fft(signal1)
-    fft_signal2 = np.fft.fft(signal2)
-    
-    # Compute the cross-spectrum
-    cross_spectrum = fft_signal1 * np.conj(fft_signal2)
-    
-    # Compute the inverse FFT of the cross-spectrum to get the cross-correlation.
-    cross_correlation = np.fft.ifft(cross_spectrum)
-    
-    # Find the index of the maximum in the cross-correlation
-    shift = np.argmax(np.abs(cross_correlation))
-    
-    # Adjust shift for signals longer than half the length (to handle negative shifts)
-    if shift > len(signal1) // 2:
-        shift -= len(signal1)
-    
+    # Index k >= 0 is the lag +k, the end of the array holds the lags -1, -2, ... -(n2 - 1).
+    lags = np.concatenate([np.arange(-(n2 - 1), 0), np.arange(0, n1)])
+    values = np.concatenate([cross_correlation[n_fft - (n2 - 1):], cross_correlation[:n1]])
+    shift = int(lags[np.argmax(np.abs(values))])
+
     if plot:
         # Plot signals and cross-correlation
-        time = np.arange(signal1.shape[0])
+        time1, time2 = np.arange(n1), np.arange(n2)
         fig, axs = plt.subplots(3, 1, figsize=(10, 8))
-        axs[0].plot(time, signal1, label="Original Signal")
-        axs[0].plot(time, signal2, label="Shifted Signal")
+        axs[0].plot(time1, signal1, label="Original Signal")
+        axs[0].plot(time2, signal2, label="Shifted Signal")
         axs[0].set_title("Signals")
         axs[0].legend()
-        axs[2].plot(time, signal1, label="Original Signal")
-        axs[2].plot(time - shift, signal2, label="Aligned Shifted Signal")
+        axs[1].plot(lags, np.abs(values))
+        axs[1].set_title("Cross-correlation")
+        axs[2].plot(time1, signal1, label="Original Signal")
+        axs[2].plot(time2 + shift, signal2, label="Aligned Shifted Signal")
         axs[2].set_title("Aligned Signals After Calculating Shift")
         axs[2].legend()
         plt.tight_layout()
         plt.show()
-    
+
     return shift
 
 
@@ -216,10 +186,10 @@ def sync_videos(vid_1_path: Path, vid_2_path: Path):
     results_folder_path = vid_1_path.parent / Path("results")
     results_folder_path.mkdir(parents=True, exist_ok=True)
     
-    aud_1_path = results_folder_path / (vid_1_path.stem + ".aac")
+    aud_1_path = results_folder_path / (vid_1_path.stem + ".wav")
     extract_audio_tracks(vid_1_path, audio_output_path=aud_1_path)
     
-    aud_2_path = results_folder_path / (vid_2_path.stem + ".aac")
+    aud_2_path = results_folder_path / (vid_2_path.stem + ".wav")
     extract_audio_tracks(vid_2_path, audio_output_path=aud_2_path)
     
     # We use the sample rate 16kHz. Only relevant here for calculating the shift, more samples may mean longer

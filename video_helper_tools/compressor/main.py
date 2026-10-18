@@ -1,8 +1,7 @@
 import sys
 import os
-import i18n
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QIcon, QFontDatabase, QFont
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon, QFontDatabase, QFont
 
 from .gui import ArchiverGUI
 
@@ -24,7 +23,7 @@ def main():
         
     gui = ArchiverGUI()
     gui.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()

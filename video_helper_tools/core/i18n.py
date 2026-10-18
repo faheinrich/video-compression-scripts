@@ -1,0 +1,433 @@
+"""Minimal UI translation: English source strings in code, German table below.
+
+Widgets call tr() when they are built; switching the language rebuilds the tool pages.
+"""
+
+LANGUAGES = [("de", "Deutsch"), ("en", "English")]
+DEFAULT_LANGUAGE = "de"
+
+_current = DEFAULT_LANGUAGE
+
+
+def set_language(code):
+    global _current
+    _current = code if code in dict(LANGUAGES) else DEFAULT_LANGUAGE
+
+
+def current_language():
+    return _current
+
+
+def tr(text, **kwargs):
+    if _current == "de":
+        text = GERMAN.get(text, text)
+    return text.format(**kwargs) if kwargs else text
+
+
+GERMAN = {
+    # Main window / landing page
+    'Sync Videos': 'Videos synchronisieren',
+    'Transcribe Audio': 'Audio transkribieren',
+    'Backup (rsync)': 'Backup (rsync)',
+    'About': 'Über',
+    'Choose a tool to start': 'Wähle ein Werkzeug',
+    'Back': 'Zurück',
+    'Back to the overview ({shortcut})': 'Zurück zur Übersicht ({shortcut})',
+    'About Video Helper Tools': 'Über Video Helper Tools',
+    '<h2>Video Helper Tools</h2><p>A suite of tools for video processing, including compression, syncing, and transcription.</p><p>Version: {version}</p>':
+        '<h2>Video Helper Tools</h2><p>Eine Sammlung von Werkzeugen für Videos: Komprimieren, Synchronisieren und Transkribieren.</p><p>Version: {version}</p>',
+    'Language': 'Sprache',
+    'Please stop running jobs first (compression, rsync, transcription or the local Whisper server), then change the language.':
+        'Bitte beende zuerst laufende Vorgänge (Komprimierung, rsync, Transkription oder den lokalen Whisper-Server) und wechsle dann die Sprache.',
+    'Jobs still running': 'Vorgänge laufen noch',
+    'A job is still running. Quit anyway?\nRunning compressions are aborted and their unfinished output files deleted.':
+        'Es läuft noch ein Vorgang. Trotzdem beenden?\nLaufende Komprimierungen werden abgebrochen und ihre unfertigen Zieldateien gelöscht.',
+
+    # Shared
+    'Compress & Archive': 'Komprimieren & Archivieren',
+    'Language:': 'Sprache:',
+    'Settings': 'Einstellungen',
+    'Done': 'Fertig',
+    'Stop': 'Stopp',
+    'Success': 'Erfolg',
+    'Error': 'Fehler',
+    'Browse…': 'Durchsuchen…',
+    'Target folder:': 'Zielordner:',
+    'Select target folder': 'Zielordner auswählen',
+
+    # Compress & Archive
+    'Clearly visible loss.': 'Deutlich sichtbare Verluste.',
+    'Visually lossless; files can get very large.': 'Visuell verlustfrei; Dateien können sehr groß werden.',
+    '{minutes} min': '{minutes} Min.',
+    'Practically lossless, very large files.': 'Praktisch verlustfrei, sehr große Dateien.',
+    'Visually lossless.': 'Visuell verlustfrei.',
+    'The sweet spot for archives.': 'Der Sweet Spot für Archive.',
+    'Smaller files, slight visible loss.': 'Kleinere Dateien, leichte sichtbare Verluste.',
+    'Small files, visible loss.': 'Kleine Dateien, sichtbare Verluste.',
+    'Good balance of size and quality.': 'Gute Balance aus Größe und Qualität.',
+    'Very high quality, almost visually lossless.': 'Sehr hohe Qualität, fast visuell verlustfrei.',
+    '{days} d {hours} h': '{days} T {hours} Std.',
+    '{hours} h {minutes} min': '{hours} Std. {minutes} Min.',
+    'Log: {name}': 'Log: {name}',
+    'Type a path, drop a folder here, or choose one.': 'Pfad eintippen, Ordner hierher ziehen oder auswählen.',
+    'Choose…': 'Auswählen…',
+    'Source': 'Quelle',
+    'Folder with the original videos': 'Ordner mit den Originalvideos',
+    'Target': 'Ziel',
+    'Where the compressed videos go': 'Wohin die komprimierten Videos kommen',
+    'More actions': 'Weitere Aktionen',
+    'Export list as CSV…': 'Liste als CSV exportieren…',
+    'Search files': 'Dateien suchen',
+    'Videos are processed in this order. Click a column to change it.':
+        'Die Videos werden in dieser Reihenfolge verarbeitet. Klick auf eine Spalte ändert sie.',
+    'More parallel videos only help while CPU or GPU still have headroom.':
+        'Mehr parallele Videos helfen nur, solange CPU bzw. GPU noch Reserven haben.',
+    'Output is always HEVC (hvc1) with AAC audio; capture date and location are kept.':
+        'Ausgaben sind immer HEVC (hvc1) mit AAC-Ton; Aufnahmedatum und Ort bleiben erhalten.',
+    'Advanced': 'Erweitert',
+    'CRF': 'CRF',
+    'Lower means better quality and larger files; 18-19 is visually lossless, 20-23 the sweet spot for archives.':
+        'Niedriger heißt bessere Qualität und größere Dateien; 18-19 ist visuell verlustfrei, 20-23 der Sweet Spot für Archive.',
+    'Slower presets give smaller files at the same quality but take longer.':
+        'Langsamere Presets ergeben bei gleicher Qualität kleinere Dateien, brauchen aber länger.',
+    'Quality': 'Qualität',
+    'Higher means better quality and larger files; 45-59 is balanced, 60-79 almost visually lossless, 80+ visually lossless.':
+        'Höher heißt bessere Qualität und größere Dateien; 45-59 ist ausgewogen, 60-79 fast visuell verlustfrei, ab 80 visuell verlustfrei.',
+    'Copy AAC audio 1:1': 'AAC-Ton 1:1 übernehmen',
+    'Lossless and faster; only applies when the source already has AAC audio.':
+        'Verlustfrei und schneller; greift nur, wenn die Quelle schon AAC-Ton hat.',
+    "Don't keep subfolders": 'Unterordner nicht übernehmen',
+    'All videos go directly into the target folder.': 'Alle Videos landen direkt im Zielordner.',
+    'Overwrite existing results': 'Vorhandene Ergebnisse überschreiben',
+    'Videos that already have a result in the target folder are compressed again.':
+        'Videos, die schon ein Ergebnis im Zielordner haben, werden neu komprimiert.',
+    'Test run (first second only)': 'Testlauf (nur 1. Sekunde)',
+    'Compresses only the first second of each video to check the settings quickly.':
+        'Komprimiert nur die erste Sekunde jedes Videos, um die Einstellungen schnell zu prüfen.',
+    'Save as default': 'Als Standard speichern',
+    'Much smaller files, some visible loss of detail.': 'Deutlich kleinere Dateien, sichtbar weniger Details.',
+    'Hardly any visible difference to the original.': 'Kaum sichtbarer Unterschied zum Original.',
+    'Practically lossless; files stay large.': 'Praktisch verlustfrei; die Dateien bleiben groß.',
+    'CRF {value}': 'CRF {value}',
+    'VideoToolbox quality {value}': 'VideoToolbox-Qualität {value}',
+    'Choose folder': 'Ordner auswählen',
+    'All': 'Alle',
+    'Planned': 'Geplant',
+    'Running': 'Läuft',
+    'Skipped': 'Übersprungen',
+    'Duplicate target name': 'Zielname doppelt',
+    'Errors': 'Fehler',
+    'Scanning folders…': 'Ordner werden gescannt…',
+    'No videos found in the source folder.': 'Im Quellordner wurden keine Videos gefunden.',
+    '{done} of {total} finished': '{done} von {total} fertig',
+    'Show original': 'Original zeigen',
+    'Export list as CSV': 'Liste als CSV exportieren',
+    'CSV files (*.csv);;All files (*)': 'CSV-Dateien (*.csv);;Alle Dateien (*)',
+    'No log output yet.': 'Noch keine Log-Ausgabe.',
+    'Videos': 'Videos',
+    'Size': 'Größe',
+    'Savings': 'Ersparnis',
+    'Free at target': 'Frei am Ziel',
+    'Current: {meaning}': 'Aktuell: {meaning}',
+    'Small': 'Klein',
+    'Archive': 'Archiv',
+    'High': 'Hoch',
+    'Encoder': 'Encoder',
+    'CPU (libx265, smaller files)': 'CPU (libx265, kleinere Dateien)',
+    'Mac GPU (VideoToolbox, fast)': 'Mac-GPU (VideoToolbox, schnell)',
+    'Limits': 'Begrenzen',
+    'Resolution': 'Auflösung',
+    'Frame rate': 'Bildrate',
+    'Parallel videos': 'Parallele Videos',
+    'Apple Photos': 'Apple Fotos',
+    'Preset': 'Preset',
+    'Custom: {detail}': 'Benutzerdefiniert: {detail}',
+    'Missing system dependencies': 'Fehlende System-Abhängigkeiten',
+    'The following required tools were not found:\n\n{tools}':
+        'Die folgenden benötigten Tools wurden nicht gefunden:\n\n{tools}',
+    "Please install them (e.g. via Homebrew: 'brew install ffmpeg exiftool') so the app works.":
+        "Bitte installiere sie (z.B. per Homebrew: 'brew install ffmpeg exiftool'), damit die App funktioniert.",
+    'Start archiving': 'Archivierung starten',
+    'Overwrite existing results?': 'Vorhandene Ergebnisse überschreiben?',
+    '“Overwrite existing results” is on: existing files in the target folder will be replaced. Continue?':
+        '„Vorhandene Ergebnisse überschreiben“ ist aktiv: Vorhandene Dateien im Zielordner werden ersetzt. Fortfahren?',
+    'Choose a source and a target folder; the scan starts automatically.':
+        'Wähle Quell- und Zielordner, der Scan startet dann automatisch.',
+    'Ready: {count} to compress, {replacing} of them replace an existing result. Order: as sorted in the table.':
+        'Bereit: {count} zu komprimieren, davon ersetzen {replacing} ein vorhandenes Ergebnis. Reihenfolge: wie in der Tabelle sortiert.',
+    'Replace original with result…': 'Original durch Ergebnis ersetzen…',
+    'Swap original and result…': 'Original und Ergebnis tauschen…',
+    'Delete original…': 'Original löschen…',
+    'Delete result…': 'Ergebnis löschen…',
+    'Process next': 'Als Nächstes',
+    'Compare': 'Vergleichen',
+    'Show result': 'Ergebnis zeigen',
+    'Log': 'Log',
+    'File actions': 'Datei-Aktionen',
+    'Log exported.': 'Log exportiert.',
+    'Default settings saved.': 'Standard-Einstellungen gespeichert.',
+    'Scan again': 'Neu scannen',
+    'No limit': 'Nicht begrenzen',
+    '{pixels} px (long side)': '{pixels} px (lange Seite)',
+    'Estimated once the first video is finished.': 'Wird geschätzt, sobald das erste Video fertig ist.',
+    'Based on the videos already compressed (ratio {ratio:.0%}).':
+        'Basierend auf den bereits komprimierten Videos (Verhältnis {ratio:.0%}).',
+    'about {time} left': 'noch etwa {time}',
+    'estimating time left…': 'Restzeit wird geschätzt…',
+    'Stopped: {done} of {total} finished.': 'Angehalten: {done} von {total} fertig.',
+    'Finished: {done} videos processed.': 'Fertig: {done} Videos verarbeitet.',
+    '{count} with errors.': '{count} mit Fehlern.',
+    'Ready: {count} to compress. Order: as sorted in the table.':
+        'Bereit: {count} zu komprimieren. Reihenfolge: wie in der Tabelle sortiert.',
+    'The action failed: {error}': 'Die Aktion ist fehlgeschlagen: {error}',
+    'Export failed: {error}': 'Export fehlgeschlagen: {error}',
+    'Saving the settings failed: {error}': 'Speichern der Einstellungen fehlgeschlagen: {error}',
+    'Probably not enough space: about {needed} needed.': 'Wahrscheinlich zu wenig Platz: etwa {needed} nötig.',
+    'Nothing to do: all {count} videos already have a result. Turn on “Overwrite existing results” to compress them again.':
+        'Nichts zu tun: Alle {count} Videos haben schon ein Ergebnis. Schalte „Vorhandene Ergebnisse überschreiben“ ein, um sie neu zu komprimieren.',
+    'Overwrite': 'Überschreiben',
+    "Really replace the original '{name}' with the compressed version?":
+        "Das Original '{name}' wirklich durch die komprimierte Version ersetzen?",
+    'original replaced': 'Original ersetzt',
+    'Savings (estimated)': 'Ersparnis (geschätzt)',
+    'Swap': 'Tauschen',
+    'Really swap the original and the compressed version?': 'Original und komprimierte Version wirklich tauschen?',
+    'swapped': 'getauscht',
+    'Delete': 'Löschen',
+    "Really delete the original '{name}'?\nThis cannot be undone!":
+        "Das Original '{name}' wirklich löschen?\nDas kann nicht rückgängig gemacht werden!",
+    'original deleted': 'Original gelöscht',
+    "Really delete the compressed version '{name}'?\nThis cannot be undone!":
+        "Die komprimierte Version '{name}' wirklich löschen?\nDas kann nicht rückgängig gemacht werden!",
+    'result deleted': 'Ergebnis gelöscht',
+    'Planned · moved up': 'Geplant · vorgezogen',
+    'Running · {percent} %': 'Läuft · {percent} %',
+    'Already archived': 'Schon archiviert',
+    'CPU': 'CPU',
+    'Mac GPU': 'Mac-GPU',
+    'quality {value}': 'Qualität {value}',
+    'full resolution': 'volle Auflösung',
+    'original frame rate': 'Original-Bildrate',
+    'test run': 'Testlauf',
+    'AAC copied': 'AAC übernommen',
+    'audio re-encoded': 'Ton neu kodiert',
+    'File': 'Datei',
+    'Duration': 'Dauer',
+    'Original': 'Original',
+    'Result': 'Ergebnis',
+    'Status': 'Status',
+    'Made before settings were recorded.': 'Erstellt, bevor Einstellungen gespeichert wurden.',
+    'Compare: {name}': 'Vergleich: {name}',
+    'Unknown': 'Unbekannt',
+    '<b>Original (scroll to zoom, drag to pan)</b><br>{meta}':
+        '<b>Original (Mausrad zum Zoomen, Ziehen zum Verschieben)</b><br>{meta}',
+    '🔄 Rotate': '🔄 Drehen',
+    '<b>Compressed (scroll to zoom, drag to pan)</b><br>{meta}':
+        '<b>Komprimiert (Mausrad zum Zoomen, Ziehen zum Verschieben)</b><br>{meta}',
+    '⏮ From the start': '⏮ Von vorne',
+    '▶️ Play / ⏸️ Pause': '▶️ Abspielen / ⏸️ Pause',
+    'Space bar': 'Leertaste',
+    '🔄 Reset view': '🔄 Ansicht zurücksetzen',
+    'Close': 'Schließen',
+    'Video error': 'Videofehler',
+    'The {side} could not be played: {error}\n\nFile: {name}\nFormat: {format}':
+        'Das {side} konnte nicht abgespielt werden: {error}\n\nDatei: {name}\nFormat: {format}',
+    'original': 'Original',
+    'compressed version': 'komprimierte Version',
+    'unknown error': 'unbekannter Fehler',
+    'could not be read': 'nicht lesbar',
+    '❌ Error in {name}: FFmpeg exit code {code}': '❌ Fehler bei {name}: FFmpeg-Exitcode {code}',
+    ' ⚠️ (metadata could not be copied: {error})': ' ⚠️ (Metadaten konnten nicht kopiert werden: {error})',
+    ' ⚠️ (original copied because it is smaller)': ' ⚠️ (Original kopiert, weil es kleiner ist)',
+    ' ⚠️ (original not Apple Photos compatible, kept the compressed version)':
+        ' ⚠️ (Original nicht Apple-Fotos-kompatibel, komprimierte Version behalten)',
+    'Start error': 'Startfehler',
+    '❌ Could not start {name}: {error}': '❌ Konnte {name} nicht starten: {error}',
+    '❌ Post-processing failed for {name}: {error}': '❌ Nachbearbeitung von {name} fehlgeschlagen: {error}',
+    '\n[INFO] Copying metadata & EXIF tags...': '\n[INFO] Kopiere Metadaten & EXIF-Tags...',
+    'FFmpeg error': 'FFmpeg-Fehler',
+    'Already exists': 'Bereits vorhanden',
+    'Duration differs': 'Länge weicht ab',
+
+    # Rsync backup
+    'Source folder:': 'Quellordner:',
+    'Mirrors a folder to a backup location (e.g. an external drive) with rsync.\nOptions: {options}':
+        'Spiegelt einen Ordner mit rsync an einen Backup-Ort (z.B. eine externe Festplatte).\nOptionen: {options}',
+    'Folder to back up': 'Ordner, der gesichert wird',
+    'Backup location, e.g. an external drive': 'Backup-Ort, z. B. eine externe Festplatte',
+    'The rsync output appears here once the sync is running.': 'Die rsync-Ausgabe erscheint hier, sobald der Sync läuft.',
+    'Files': 'Dateien',
+    'Elapsed': 'Dauer',
+    'About the shift calculation':
+        'Zur Berechnung des Versatzes',
+    'How the shift is calculated and how accurate it is':
+        'Wie der Versatz berechnet wird und wie genau er ist',
+    'Case':
+        'Fall',
+    'No benchmark results found.':
+        'Keine Benchmark-Ergebnisse gefunden.',
+    'The benchmark cuts two excerpts from one recording, so the true shift is known. Both excerpts are then distorted independently of each other (as with two different microphones). A result counts as correct if it is within the tolerance of the true shift. Shown: correct cases / all cases.':
+        'Der Benchmark schneidet zwei Ausschnitte aus einer Aufnahme, so ist der wahre Versatz bekannt. Beide Ausschnitte werden dann unabhängig voneinander gestört (wie bei zwei verschiedenen Mikrofonen). Ein Ergebnis gilt als richtig, wenn es innerhalb der Toleranz vom wahren Versatz liegt. Angezeigt: richtige Fälle / alle Fälle.',
+    'Tolerance: {ms} ms':
+        'Toleranz: {ms} ms',
+    'How the shift is calculated':
+        'So wird der Versatz berechnet',
+    'The sound of the first audio track of both videos is extracted (mono, 16 kHz).':
+        'Der Ton der ersten Tonspur beider Videos wird extrahiert (Mono, 16 kHz).',
+    'A cross-correlation (computed with the FFT) measures for every possible shift how well the two sounds match. The shift with the highest peak is the result.':
+        'Eine Kreuzkorrelation (berechnet mit der FFT) misst für jeden möglichen Versatz, wie gut die beiden Töne übereinstimmen. Der Versatz mit dem höchsten Peak ist das Ergebnis.',
+    'Both sounds are padded with silence first, so shifts of any size are found with the right sign.':
+        'Beide Töne werden vorher mit Stille aufgefüllt, damit auch große Versätze mit richtigem Vorzeichen gefunden werden.',
+    'The video that started earlier is trimmed at the start by the shift when you save. The result can be refined with the buttons for manual adjustment.':
+        'Das Video, das früher gestartet ist, wird beim Speichern am Anfang um den Versatz gekürzt. Das Ergebnis lässt sich mit den Buttons zur manuellen Anpassung verfeinern.',
+    'Only the sound is compared, never the picture. One sample is 0.06 ms, the real accuracy is limited by the recordings.':
+        'Verglichen wird nur der Ton, nie das Bild. Ein Sample sind 0,06 ms, die tatsächliche Genauigkeit wird durch die Aufnahmen begrenzt.',
+    'Where it works':
+        'Wo es funktioniert',
+    'Reliable with noise, filters (also telephone quality), clipping, compression and moderate reverb, as long as both recordings share enough sound.':
+        'Zuverlässig bei Rauschen, Filtern (auch Telefonqualität), Übersteuerung, Kompression und mäßigem Nachhall, solange beide Aufnahmen genug gemeinsamen Ton haben.',
+    'Heavy noise':
+        'Starkes Rauschen',
+    'fails when the noise is much louder than the sound on both recordings (about −25 dB SNR each).':
+        'scheitert, wenn das Rauschen auf beiden Aufnahmen viel lauter ist als der Ton (etwa −25 dB SNR je Aufnahme).',
+    'Strong reverb':
+        'Starker Nachhall',
+    'in very echoey rooms the result can be off by tens of milliseconds.':
+        'in sehr hallenden Räumen kann das Ergebnis um einige zehn Millisekunden abweichen.',
+    'Clock drift':
+        'Taktdrift',
+    'if the two devices run at different speeds, the shift changes over time. You get an average, and large drift (5000 ppm = 0.3 s per minute) is off by about 0.1 s.':
+        'wenn die beiden Geräte unterschiedlich schnell laufen, ändert sich der Versatz mit der Zeit. Man erhält einen Mittelwert, und bei großer Drift (5000 ppm = 0,3 s pro Minute) liegt er etwa 0,1 s daneben.',
+    'Little common sound':
+        'Wenig gemeinsamer Ton',
+    'with about one second of overlap or less the result is wrong; a few seconds are still enough.':
+        'bei etwa einer Sekunde Überlappung oder weniger ist das Ergebnis falsch; einige Sekunden reichen noch.',
+    'Repeating material':
+        'Sich wiederholendes Material',
+    'for loops, beats or constant tones the result can be off by whole multiples of the repetition.':
+        'bei Loops, Beats oder Dauertönen kann das Ergebnis um ganze Vielfache der Wiederholung abweichen.',
+    'Distance':
+        'Abstand',
+    'microphones at different distances hear the same sound at slightly different times (about 3 ms per metre). That is real, not an error.':
+        'Mikrofone in unterschiedlichem Abstand hören denselben Ton zu leicht verschiedenen Zeiten (etwa 3 ms pro Meter). Das ist real und kein Fehler.',
+    'Benchmark results':
+        'Benchmark-Ergebnisse',
+    'Run it yourself: python -m video_helper_tools.sync.benchmark':
+        'Selbst ausführen: python -m video_helper_tools.sync.benchmark',
+    'Start sync': 'Sync starten',
+    'Stop sync': 'Sync stoppen',
+    'Select source folder': 'Quellordner auswählen',
+    'Sync from:\n{src}\nto:\n{tgt}\n\nFiles in the target folder that no longer exist in the source folder will be deleted (--del). Continue?':
+        'Sync von:\n{src}\nnach:\n{tgt}\n\nDateien im Zielordner, die im Quellordner nicht (mehr) existieren, werden gelöscht (--del). Fortfahren?',
+    'Running command: {command}': 'Führe aus: {command}',
+    'Please select both source and target folders.': 'Bitte wähle Quell- und Zielordner aus.',
+    'Source folder does not exist.': 'Der Quellordner existiert nicht.',
+    'Process stopped by user.': 'Vorgang vom Nutzer gestoppt.',
+    'Sync completed successfully!': 'Sync erfolgreich abgeschlossen!',
+    'Sync finished with exit code {code}.': 'Sync mit Exitcode {code} beendet.',
+
+    # Video sync
+    'Load videos': 'Videos laden',
+    'Sync (calculate shift)': 'Synchronisieren (Versatz berechnen)',
+    'Shift: {seconds:.2f} s': 'Versatz: {seconds:.2f} s',
+    'Reset': 'Zurücksetzen',
+    'Save synced videos': 'Synchronisierte Videos speichern',
+    'Waveform 1': 'Wellenform 1',
+    'Waveform 2': 'Wellenform 2',
+    'Play': 'Abspielen',
+    'Mute': 'Stumm',
+    'Select video': 'Video auswählen',
+    'Videos (*.mp4 *.mkv *.avi *.mov)': 'Videos (*.mp4 *.mkv *.avi *.mov)',
+    'Synced videos saved to:\n{folder}': 'Synchronisierte Videos gespeichert in:\n{folder}',
+    'Video 1:': 'Video 1:',
+    'Video 2:': 'Video 2:',
+    'Volume:': 'Lautstärke:',
+    'Manual adjustment:': 'Manuell anpassen:',
+    'Unmute': 'Ton an',
+    'Please load both videos and choose a target folder first.':
+        'Bitte lade zuerst beide Videos und wähle einen Zielordner.',
+
+    # Transcriber
+    'Single File': 'Einzelne Datei',
+    'Files & Preview': 'Dateien & Vorschau',
+    'Browse': 'Durchsuchen',
+    'Input Video:': 'Eingabevideo:',
+    'Output ELAN:': 'ELAN-Ausgabe:',
+    'ELAN Tier Name:': 'ELAN-Tier-Name:',
+    'No Video Selected': 'Kein Video ausgewählt',
+    'Batch Mode': 'Stapelmodus',
+    'Folder Selection': 'Ordnerauswahl',
+    'Video Folder:': 'Videoordner:',
+    'Check Folder': 'Ordner prüfen',
+    'Server Check': 'Serverprüfung',
+    'Check Server': 'Server prüfen',
+    'Start Local Server': 'Lokalen Server starten',
+    'Status: Unknown': 'Status: Unbekannt',
+    'Start Batch Transcription': 'Stapel-Transkription starten',
+    'Open Results Folder': 'Ergebnisordner öffnen',
+    'Server Settings': 'Server-Einstellungen',
+    'Port: ': 'Port: ',
+    'Server IP & Port:': 'Server-IP & Port:',
+    'Show Server Log': 'Server-Log zeigen',
+    'Whisper Model:': 'Whisper-Modell:',
+    'Transcription Padding:': 'Puffer um Segmente:',
+    'Show Advanced Options': 'Erweiterte Optionen zeigen',
+    'Set as Defaults': 'Als Standard speichern',
+    'VAD Threshold:': 'VAD-Schwelle:',
+    'Min Speech Duration:': 'Min. Sprechdauer:',
+    'Waveform & Transcripts': 'Wellenform & Transkripte',
+    'Ready': 'Bereit',
+    'Start Transcription': 'Transkription starten',
+    'Show in Finder': 'Im Finder zeigen',
+    'Select Folder': 'Ordner auswählen',
+    'Starting batch transcription of {count} files...': 'Starte Stapel-Transkription von {count} Dateien...',
+    'Processing ({index}/{count}): {name}': 'Verarbeite ({index}/{count}): {name}',
+    'Batch Finished': 'Stapel fertig',
+    'Batch transcription finished.': 'Stapel-Transkription abgeschlossen.',
+    'All files in batch have been processed.': 'Alle Dateien des Stapels wurden verarbeitet.',
+    'Select Video File': 'Videodatei auswählen',
+    'Video files (*.mp4 *.avi *.mkv *.mov);;All files (*)': 'Videodateien (*.mp4 *.avi *.mkv *.mov);;Alle Dateien (*)',
+    'Save ELAN File': 'ELAN-Datei speichern',
+    'ELAN files (*.eaf);;All files (*)': 'ELAN-Dateien (*.eaf);;Alle Dateien (*)',
+    'Starting...': 'Starte...',
+    'Starting transcription...': 'Starte Transkription...',
+    'Transcription finished successfully.': 'Transkription erfolgreich abgeschlossen.',
+    'No Audio Data': 'Keine Audiodaten',
+    'Videos in folder:': 'Videos im Ordner:',
+    'Horizontal Scale:': 'Horizontale Skalierung:',
+    'Warning': 'Warnung',
+    'Please select a valid folder.': 'Bitte wähle einen gültigen Ordner.',
+    'Info': 'Info',
+    'No supported video or audio files found in the selected folder.':
+        'Im gewählten Ordner wurden keine unterstützten Video- oder Audiodateien gefunden.',
+    'No videos found to transcribe.': 'Keine Videos zum Transkribieren gefunden.',
+    'Server Offline': 'Server offline',
+    'Server appears to be offline. Start local server?': 'Der Server scheint offline zu sein. Lokalen Server starten?',
+    'Failed: {message}': 'Fehlgeschlagen: {message}',
+    'Hide Server Log': 'Server-Log ausblenden',
+    'Hide Advanced Options': 'Erweiterte Optionen ausblenden',
+    'Server': 'Server',
+    'Server is already running.': 'Der Server läuft bereits.',
+    'Starting local server with model {model}...': 'Starte lokalen Server mit Modell {model}...',
+    'Please select a valid video file.': 'Bitte wähle eine gültige Videodatei.',
+    'Stopping transcription...': 'Stoppe Transkription...',
+    'Finished': 'Fertig',
+    'Failed': 'Fehlgeschlagen',
+    'Transcription completed!': 'Transkription abgeschlossen!',
+    'Transcription failed: {message}': 'Transkription fehlgeschlagen: {message}',
+    'File {path} does not exist.': 'Die Datei {path} existiert nicht.',
+    'Please select a valid folder first.': 'Bitte wähle zuerst einen gültigen Ordner.',
+    'Settings saved to {path}': 'Einstellungen gespeichert in {path}',
+    'Settings loaded.': 'Einstellungen geladen.',
+    'Transcription stopped by user.': 'Transkription vom Nutzer gestoppt.',
+    'Could not read video': 'Video konnte nicht gelesen werden',
+    'Preview error': 'Vorschaufehler',
+    'Status: Online': 'Status: Online',
+    'Status: Error {code}': 'Status: Fehler {code}',
+    'Status: Offline': 'Status: Offline',
+    'Could not start server: {error}': 'Server konnte nicht gestartet werden: {error}',
+    'Processing segment {current}/{total}': 'Verarbeite Segment {current}/{total}',
+    'Save error': 'Speicherfehler',
+    'Could not save settings: {error}': 'Einstellungen konnten nicht gespeichert werden: {error}',
+    'Failed to start server.': 'Server konnte nicht gestartet werden.',
+}
