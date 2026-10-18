@@ -1,0 +1,36 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:   # manual test run: builds the app and keeps it as a download, but publishes nothing
+
+jobs:
+  build-mac:
+    runs-on: macos-latest   # Apple Silicon
+    permissions:
+      contents: write       # create the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Build the app
+        run: bash build.sh
+      - name: Zip the app (keeps the bundle intact)
+        run: |
+          NAME="Video-Helper-Tools-${GITHUB_REF_NAME//\//-}-macOS-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Video Helper Tools.app" "$NAME"
+          echo "ZIP=$NAME" >> "$GITHUB_ENV"
+          ls -lh "$NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP }}
+          path: ${{ env.ZIP }}
+          retention-days: 14
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$ZIP" --title "$GITHUB_REF_NAME" --generate-notes \
+            --notes "Unsigned build for Apple Silicon Macs. On first start: right-click the app, choose Open. Requires ffmpeg and exiftool (brew install ffmpeg exiftool)."

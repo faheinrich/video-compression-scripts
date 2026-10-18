@@ -28,8 +28,8 @@ uv run pyinstaller --noconfirm \
 
 echo "Build complete. Check the 'dist' directory."
 
-# If on macOS, copy the app to Applications folder
-if [[ "$OSTYPE" == "darwin"* ]]; then
+# If on macOS, copy the app to Applications folder (not on CI, where the app is packaged for a release instead)
+if [[ "$OSTYPE" == "darwin"* && -z "$CI" ]]; then
     APP_BUNDLE="dist/Video Helper Tools.app"
     if [ -d "$APP_BUNDLE" ]; then
         echo "Copying application to /Applications..."
