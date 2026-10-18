@@ -590,9 +590,9 @@ def make_hlg_clip(path):
     """Like iPhone HDR: HEVC Main 10, BT.2020, HLG."""
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(EXAMPLE_VIDEOS[0]), "-t", "2",
-         "-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le",
+         "-vf", "setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc,format=yuv420p10le",
+         "-c:v", "libx265", "-preset", "ultrafast",
          "-x265-params", "colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc:log-level=none",
-         "-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc",
          "-tag:v", "hvc1", "-c:a", "aac", str(path)],
         check=True,
     )

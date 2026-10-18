@@ -29,6 +29,7 @@ annotate-to-elan = "video_helper_tools.transcriber.transcribe_video_to_elan:main
 dev = [
     "pyinstaller",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
 ]
 
 [build-system]
@@ -41,3 +42,11 @@ packages = ["video_helper_tools"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["video_helper_tools"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
