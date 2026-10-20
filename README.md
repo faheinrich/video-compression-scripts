@@ -37,6 +37,7 @@ It is intended for:
 - Support for resolution and frame-rate reduction to save storage
 - GUI with live logs, progress display, and side-by-side preview
 - HEVC output tagged `hvc1` so it imports into Apple Photos
+- Editable result postfix (default `_archived`) and a list of name endings to skip in the source folder (default `_archived, _compressed`)
 
 ### Sync Videos
 

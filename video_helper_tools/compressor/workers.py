@@ -12,7 +12,7 @@ from PySide6.QtGui import QImage
 
 from video_helper_tools.core.i18n import tr
 from .utils import (
-    EXIFTOOL_CONFIG, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
+    DEFAULT_POSTFIX, EXIFTOOL_CONFIG, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
     get_audio_streams, get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
 )
 
@@ -20,11 +20,14 @@ class UnifiedScanWorker(QThread):
     file_found = Signal(dict)
     scan_finished = Signal(list)
     
-    def __init__(self, src_dir, dst_dir, flatten=False, sort_by="name_asc"):
+    def __init__(self, src_dir, dst_dir, flatten=False, sort_by="name_asc", postfix=DEFAULT_POSTFIX, excludes=()):
         super().__init__()
         self.src_dir = Path(src_dir)
         self.dst_dir = Path(dst_dir)
         self.flatten = flatten
+        self.postfix = postfix
+        # Results of earlier runs lying in the source folder are never compressed again.
+        self.excludes = tuple(e.lower() for e in excludes) + ((postfix.lower(),) if postfix else ())
         self.sort_by = sort_by
         self.video_types = [".mov", ".mp4", ".avi", ".mts", ".ogv", ".m4v", ".mkv"]
     
@@ -38,13 +41,13 @@ class UnifiedScanWorker(QThread):
             for src_path in orig_files:
                 rel_path = src_path.relative_to(self.src_dir)
                 stem = src_path.stem
-                
-                stem_for_dst = stem[:-9] if stem.lower().endswith("_archived") else stem
+                if stem.lower().endswith(self.excludes):
+                    continue
 
-                if self.flatten:
-                    predicted_dst = self.dst_dir / f"{stem_for_dst}_archived.mp4"
-                else:
-                    predicted_dst = self.dst_dir / rel_path.with_name(f"{stem_for_dst}_archived.mp4")
+                name = f"{stem}{self.postfix}.mp4"
+                predicted_dst = self.dst_dir / name if self.flatten else self.dst_dir / rel_path.with_name(name)
+                if predicted_dst == src_path:  # an empty postfix in the same folder would overwrite the original
+                    continue
                 
                 # Check if it already exists
                 comp_path = None

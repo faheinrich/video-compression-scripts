@@ -68,10 +68,11 @@ def test_scan_predicts_target_names_and_detects_existing_results(qapp, tmp_path)
     assert by_name["a.mov"]["size"] == 100
 
 
-def test_scan_does_not_double_the_archived_suffix(qapp, tmp_path):
+def test_scan_ignores_videos_that_already_carry_the_result_postfix(qapp, tmp_path):
+    # They are results of an earlier run; compressing them again would give clip_archived_archived.
     src, dst = tmp_path / "src", tmp_path / "dst"
-    touch(src / "clip_archived.mp4")
-    assert scan(qapp, src, dst)[0]["dst_path"] == dst / "clip_archived.mp4"
+    touch(src / "clip_archived.mp4"), touch(src / "clip.mp4")
+    assert [i["path"].name for i in scan(qapp, src, dst)] == ["clip.mp4"]
 
 
 def test_scan_flatten_puts_everything_into_one_folder(qapp, tmp_path):

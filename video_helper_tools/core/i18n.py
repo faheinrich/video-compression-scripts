@@ -102,6 +102,11 @@ GERMAN = {
     'Videos that already have a result in the target folder are compressed again.':
         'Videos, die schon ein Ergebnis im Zielordner haben, werden neu komprimiert.',
     'Test run (first second only)': 'Testlauf (nur 1. Sekunde)',
+    'Names': 'Namen',
+    'Appended to the name of each result, e.g. clip{postfix}.mp4.': 'Wird an den Namen jedes Ergebnisses angehängt, z. B. clip{postfix}.mp4.',
+    'Source videos whose name ends with one of these (separated by commas) are skipped, e.g. results of earlier runs. The result postfix is always skipped.': 'Quellvideos, deren Name auf einen dieser Einträge endet (durch Komma getrennt), werden übersprungen, z. B. Ergebnisse früherer Läufe. Das Ergebnis-Postfix wird immer übersprungen.',
+    'Result postfix': 'Postfix der Ergebnisse',
+    'Skip names ending in': 'Namen überspringen, die enden auf',
     'Compresses only the first second of each video to check the settings quickly.':
         'Komprimiert nur die erste Sekunde jedes Videos, um die Einstellungen schnell zu prüfen.',
     'Save as default': 'Als Standard speichern',

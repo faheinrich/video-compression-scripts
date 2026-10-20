@@ -23,6 +23,20 @@ def format_size(size_bytes):
     prefix = "-" if is_negative else ""
     return f"{prefix}{size_bytes:.2f} {unit_found}"
 
+DEFAULT_POSTFIX = "_archived"
+DEFAULT_EXCLUDES = "_archived, _compressed"
+
+
+def clean_postfix(text):
+    """The text appended to result names; path separators would let it escape the target folder."""
+    return re.sub(r'[\\/:\x00-\x1f]', "", text).strip()
+
+
+def parse_excludes(text):
+    """Name endings (without extension, case-insensitive) of source videos to skip."""
+    return tuple(part.lower() for part in re.split(r"[,;\s]+", text) if part)
+
+
 def get_thumbnail_path(video_path):
     video_hash = hashlib.md5(str(video_path).encode()).hexdigest()
     return thumbnail_dir() / f"{video_hash}.jpg"

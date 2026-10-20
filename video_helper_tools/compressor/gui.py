@@ -19,7 +19,9 @@ from .model import (
     COL_DURATION, COL_FILE, COL_RESULT, COL_SETTINGS, COL_SIZE, COL_STATUS,
     FileDelegate, StatusDelegate, VideoFilterProxy, VideoRow, VideoTableModel,
 )
-from .utils import check_dependencies, format_size, open_in_finder
+from .utils import (
+    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, format_size, open_in_finder, parse_excludes,
+)
 from .widgets import CompareVideoDialog, DropLineEdit
 from .workers import ArchiveWorker, DurationProbeWorker, ResultSettingsWorker, ThumbnailRunnable, UnifiedScanWorker
 
@@ -526,6 +528,17 @@ class ArchiverGUI(QWidget):
         self.cb_dry_run.setToolTip(tr("Compresses only the first second of each video to check the settings quickly."))
         for box in (self.cb_copy_aac, self.cb_flatten, self.cb_overwrite, self.cb_dry_run):
             adv.addWidget(box)
+
+        adv.addWidget(caption(tr("Names")))
+        self.txt_postfix = QLineEdit(DEFAULT_POSTFIX)
+        self.txt_postfix.setToolTip(tr("Appended to the name of each result, e.g. clip{postfix}.mp4.", postfix=DEFAULT_POSTFIX))
+        self.txt_excludes = QLineEdit(DEFAULT_EXCLUDES)
+        self.txt_excludes.setToolTip(tr("Source videos whose name ends with one of these (separated by commas) are skipped, "
+                                        "e.g. results of earlier runs. The result postfix is always skipped."))
+        for label, edit in ((tr("Result postfix"), self.txt_postfix), (tr("Skip names ending in"), self.txt_excludes)):
+            adv.addWidget(QLabel(label))
+            adv.addWidget(edit)
+            edit.textChanged.connect(self.schedule_scan)
         self.advanced.hide()
         self.btn_advanced.toggled.connect(self.advanced.setVisible)
         self.btn_advanced.toggled.connect(lambda on: self.btn_advanced.setArrowType(Qt.DownArrow if on else Qt.RightArrow))
@@ -591,6 +604,9 @@ class ArchiverGUI(QWidget):
     def dst_dir(self):
         return Path(self.txt_dst.text().strip()).expanduser()
 
+    def postfix(self):
+        return clean_postfix(self.txt_postfix.text())
+
     def is_archiving(self):
         return self.worker is not None and self.worker.isRunning()
 
@@ -621,7 +637,7 @@ class ArchiverGUI(QWidget):
             self.btn_run.setEnabled(True)
         else:
             self.btn_run.setEnabled(bool(self.queue_items()) and not self.is_scanning())
-        for widget in (self.spin_jobs, self.txt_src, self.txt_dst, self.cb_flatten):
+        for widget in (self.spin_jobs, self.txt_src, self.txt_dst, self.cb_flatten, self.txt_postfix, self.txt_excludes):
             widget.setEnabled(not self.is_archiving())
 
     def request_summary(self):
@@ -662,7 +678,9 @@ class ArchiverGUI(QWidget):
         self.total_src_bytes = 0
         self.total_dst_bytes = 0
         self.run_paths = set()
-        self.scan_worker = UnifiedScanWorker(self.src_dir(), self.dst_dir(), self.cb_flatten.isChecked())
+        self.scan_worker = UnifiedScanWorker(
+            self.src_dir(), self.dst_dir(), self.cb_flatten.isChecked(),
+            postfix=self.postfix(), excludes=parse_excludes(self.txt_excludes.text()))
         self.scan_worker.scan_finished.connect(self.on_unified_scan_finished)
         self.scan_worker.start()
         self.update_run_enabled()
@@ -1115,6 +1133,8 @@ class ArchiverGUI(QWidget):
             'preset': self.combo_preset.currentText(),
             'vt_quality': self.slider_vt.value(),
             'flatten': self.cb_flatten.isChecked(),
+            'postfix': self.txt_postfix.text(),
+            'excludes': self.txt_excludes.text(),
             'overwrite': self.cb_overwrite.isChecked(),
             'dry_run': self.cb_dry_run.isChecked(),
         }
@@ -1157,6 +1177,8 @@ class ArchiverGUI(QWidget):
         if 'preset' in defaults: self.combo_preset.setCurrentText(defaults['preset'])
         if 'vt_quality' in defaults: self.slider_vt.setValue(defaults['vt_quality'])
         if 'flatten' in defaults: self.cb_flatten.setChecked(defaults['flatten'])
+        if 'postfix' in defaults: self.txt_postfix.setText(defaults['postfix'])
+        if 'excludes' in defaults: self.txt_excludes.setText(defaults['excludes'])
         if 'overwrite' in defaults: self.cb_overwrite.setChecked(defaults['overwrite'])
         if 'dry_run' in defaults: self.cb_dry_run.setChecked(defaults['dry_run'])
         # Paths last: setting them schedules the automatic scan.

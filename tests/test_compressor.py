@@ -182,6 +182,56 @@ def test_home_relative_paths_are_expanded(qapp, make_gui, tmp_path, monkeypatch)
     assert gui.model.rows[0].dst == tmp_path / "dst" / "clip_archived.mp4"
 
 
+def make_named_videos(folder, *names):
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / name).write_bytes(b"x")  # the scan only needs names and sizes
+
+
+def test_scan_skips_earlier_results_in_the_source_folder(qapp, make_gui, tmp_path):
+    src = tmp_path / "src"
+    make_named_videos(src, "clip.mp4", "clip_archived.mp4", "other_Compressed.mov", "note_final.mp4")
+    gui = make_gui()
+    scan(qapp, gui, str(src), str(tmp_path / "dst"))
+    assert sorted(row.src.name for row in gui.model.rows) == ["clip.mp4", "note_final.mp4"]
+
+    gui.txt_excludes.setText("_final; _archived")  # list is editable, separators are free
+    scan(qapp, gui, str(src), str(tmp_path / "dst"))
+    assert sorted(row.src.name for row in gui.model.rows) == ["clip.mp4", "other_Compressed.mov"]
+
+
+def test_result_postfix_is_editable_and_always_skipped(qapp, make_gui, tmp_path):
+    src = tmp_path / "src"
+    make_named_videos(src, "clip.mp4", "clip_small.mp4")
+    gui = make_gui()
+    gui.txt_postfix.setText("_small")
+    scan(qapp, gui, str(src), str(tmp_path / "dst"))
+    assert [(row.src.name, row.dst.name) for row in gui.model.rows] == [("clip.mp4", "clip_small.mp4")]
+
+
+def test_postfix_cannot_leave_the_target_folder_or_overwrite_the_original(qapp, make_gui, tmp_path):
+    src = tmp_path / "src"
+    make_named_videos(src, "clip.mp4", "movie.mov")
+    gui = make_gui()
+    gui.txt_postfix.setText("../x/")
+    scan(qapp, gui, str(src), str(tmp_path / "dst"))
+    assert {row.dst.parent for row in gui.model.rows} == {tmp_path / "dst"}
+    assert {row.dst.name for row in gui.model.rows} == {"clip..x.mp4", "movie..x.mov".replace(".mov", ".mp4")}
+
+    gui.txt_postfix.setText("")  # same folder, same name: would destroy clip.mp4
+    scan(qapp, gui, str(src), str(src))
+    assert [row.src.name for row in gui.model.rows] == ["movie.mov"]
+
+
+def test_name_settings_are_saved_as_defaults(qapp, make_gui, tmp_path):
+    gui = make_gui()
+    gui.txt_postfix.setText("_small")
+    gui.txt_excludes.setText("_a, _b")
+    gui.save_defaults()
+    restored = make_gui()
+    assert (restored.txt_postfix.text(), restored.txt_excludes.text()) == ("_small", "_a, _b")
+
+
 def test_quality_presets_and_custom_values(qapp, make_gui):
     gui = make_gui()
     gui.apply_quality_preset("small")
