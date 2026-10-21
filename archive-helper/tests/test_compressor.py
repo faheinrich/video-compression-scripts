@@ -828,3 +828,17 @@ def test_progress_text_shows_how_many_durations_are_read(qapp, make_gui):
     gui.duration_worker = Busy()
     assert "2 von 4" in gui.progress_message(rows, gui.model.counts())
     gui.duration_worker = None
+
+
+def test_quality_hint_does_not_change_the_layout_when_the_slider_moves(qapp, make_gui):
+    gui = make_gui()
+    gui.resize(1300, 800)
+    gui.show()
+    qapp.processEvents()
+    heights, tops = set(), set()
+    for crf in (28, 26, 23, 20, 18, 17, 15):
+        gui.slider_crf.setValue(crf)
+        qapp.processEvents()
+        heights.add(gui.quality_hint.height())
+        tops.add(gui.combo_renderer.mapTo(gui, gui.combo_renderer.rect().topLeft()).y())
+    assert len(heights) == 1 and len(tops) == 1

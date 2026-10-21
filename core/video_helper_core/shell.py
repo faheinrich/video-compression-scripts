@@ -200,7 +200,8 @@ class SuiteWindow(QMainWindow):
         super().__init__()
         self.spec = spec
         self.tool_specs = {tool.key: tool for tool in spec.tools}
-        self.setWindowTitle(spec.name)
+        # On macOS the native title would be drawn over our own title bar (and swallow clicks on the back button).
+        self.setWindowTitle("" if MAC_TITLE_BAR else spec.name)
         self.resize(1100, 850)
 
         icon_path = spec.resources / "app-icon.png"

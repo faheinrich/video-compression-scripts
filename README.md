@@ -44,6 +44,7 @@ git tag analysis-v0.0.1 && git push origin analysis-v0.0.1
 ```
 
 The version in the tag must match the app's `pyproject.toml` (and `__version__`); the workflow checks that.
+What changed in each version: [CHANGELOG.md](CHANGELOG.md).
 
 ## Who?
 This project was created by and is maintained by me, Fabian Heinrich.

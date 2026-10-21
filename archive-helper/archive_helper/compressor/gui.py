@@ -458,6 +458,10 @@ class ArchiverGUI(QWidget):
         self.quality_hint = QLabel()
         self.quality_hint.setProperty("role", "hint")
         self.quality_hint.setWordWrap(True)
+        # Room for the longest text (three lines), so the controls below do not jump when the slider
+        # passes a preset and the hint gets longer.
+        self.quality_hint.setMinimumHeight(self.quality_hint.fontMetrics().lineSpacing() * 3)
+        self.quality_hint.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         quality.addWidget(self.quality_hint)
         layout.addLayout(quality)
 
