@@ -20,7 +20,8 @@ from .model import (
     FileDelegate, StatusDelegate, VideoFilterProxy, VideoRow, VideoTableModel,
 )
 from .utils import (
-    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, format_size, open_in_finder, parse_excludes,
+    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, clear_caches, format_size, open_in_finder, parse_excludes,
+    prune_thumbnails,
 )
 from .widgets import CompareVideoDialog, DropLineEdit
 from .workers import ArchiveWorker, DurationProbeWorker, ResultSettingsWorker, ThumbnailRunnable, UnifiedScanWorker
@@ -172,6 +173,7 @@ class ArchiverGUI(QWidget):
         self.load_defaults()
         self.refresh_summary()
         self.check_system_dependencies()
+        prune_thumbnails()
 
     # ------------------------------------------------------------------ layout
     FIXED_COLUMNS = {COL_DURATION: 80, COL_SIZE: 100, COL_RESULT: 150, COL_STATUS: 160}
@@ -276,6 +278,7 @@ class ArchiverGUI(QWidget):
         shortcut = QKeySequence("Ctrl+R").toString(QKeySequence.NativeText)
         menu.addAction(f"{tr('Scan again')}\t{shortcut}", self.start_unified_scan)
         menu.addAction(tr("Export list as CSV…"), self.export_logs)
+        menu.addAction(tr("Clear thumbnail and duration cache"), self.clear_cache)
         more.setMenu(menu)
         self.btn_run = QPushButton(objectName="runButton")
         self.btn_run.clicked.connect(self.toggle_run)
@@ -759,6 +762,7 @@ class ArchiverGUI(QWidget):
             QThreadPool.globalInstance().start(runnable)
         self.duration_worker = DurationProbeWorker([row.src for row in rows])
         self.duration_worker.duration_found.connect(self.on_duration_found)
+        self.duration_worker.finished.connect(self.request_summary)
         self.duration_worker.start()
         self.settings_worker = ResultSettingsWorker([(row.src, row.dst) for row in rows if row.status == "exists"])
         self.settings_worker.settings_found.connect(self.on_settings_found)
@@ -1002,6 +1006,8 @@ class ArchiverGUI(QWidget):
         elif not run_rows:
             parts.append(tr("Nothing to do: all {count} videos already have a result. Turn on “Overwrite existing results” to compress them again.",
                             count=len(rows)))
+        if self.duration_worker is not None and self.duration_worker.isRunning():
+            parts.append(tr("Reading durations: {done} of {total}…", done=sum(1 for r in rows if r.duration), total=len(rows)))
         return " ".join(parts)
 
     # ------------------------------------------------------------- row detail
@@ -1143,6 +1149,10 @@ class ArchiverGUI(QWidget):
         self.update_detail_bar()
 
     # ------------------------------------------------------------------ files
+    def clear_cache(self):
+        freed = clear_caches()
+        QMessageBox.information(self, tr("Cache"), tr("Cache cleared ({size} freed). Thumbnails and durations are read again at the next scan.", size=format_size(freed)))
+
     def export_logs(self):
         file_path, _ = QFileDialog.getSaveFileName(self, tr("Export list as CSV"), "compression_log.csv", tr("CSV files (*.csv);;All files (*)"))
         if not file_path:

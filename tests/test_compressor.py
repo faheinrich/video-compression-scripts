@@ -811,3 +811,20 @@ def test_dragging_a_column_narrower_leaves_no_gap_at_the_right(make_gui, qapp):
     header = gui.table.horizontalHeader()
     assert header.length() >= gui.table.viewport().width()
     assert header.sectionSize(5) > 160   # the status column took the freed room
+
+
+def test_progress_text_shows_how_many_durations_are_read(qapp, make_gui):
+    from video_helper_tools.compressor.model import VideoRow
+
+    gui = make_gui()
+    root = Path("/src")
+    rows = [VideoRow(src=root / f"{n}.mp4", dst=root / f"{n}_x.mp4", size=10, duration=5 if n < 2 else None, root=root) for n in range(4)]
+    gui.model.reset(rows)
+
+    class Busy:
+        def isRunning(self):
+            return True
+
+    gui.duration_worker = Busy()
+    assert "2 von 4" in gui.progress_message(rows, gui.model.counts())
+    gui.duration_worker = None

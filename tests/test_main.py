@@ -64,3 +64,21 @@ def test_about_dialog_names_the_app(qapp, monkeypatch):
     window.show_about()
     assert any("Video Helper Tools" in t for t in texts)
     window.close()
+
+
+def test_about_dialog_version_matches_pyproject(qapp, monkeypatch):
+    import tomllib
+    from pathlib import Path
+
+    import main
+    from PySide6.QtWidgets import QMessageBox
+    from video_helper_tools import __version__
+
+    declared = tomllib.loads((Path(main.__file__).parent / "pyproject.toml").read_text())["project"]["version"]
+    assert __version__ == declared
+    texts = []
+    monkeypatch.setattr(QMessageBox, "setText", lambda self, text: texts.append(text))
+    window = main.VideoHelperToolsSuite()
+    window.show_about()
+    assert any(declared in t for t in texts)
+    window.close()

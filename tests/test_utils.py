@@ -93,3 +93,26 @@ def test_copy_file_times_copies_creation_time(tmp_path):
     copy_file_times(src, dst)
     assert int(dst.stat().st_birthtime) == int(src.stat().st_birthtime) == old
     assert int(dst.stat().st_mtime) == later
+
+
+def test_thumbnail_path_changes_when_the_video_changes(tmp_path):
+    from video_helper_tools.compressor.utils import get_thumbnail_path
+
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"1")
+    first = get_thumbnail_path(video)
+    video.write_bytes(b"22")
+    assert get_thumbnail_path(video) != first
+
+
+def test_old_thumbnails_are_pruned_and_the_cache_can_be_cleared(tmp_path):
+    from video_helper_tools.compressor.utils import clear_caches, prune_thumbnails
+    from video_helper_tools.core.paths import duration_cache_file, thumbnail_dir
+
+    old, fresh = thumbnail_dir() / "old.jpg", thumbnail_dir() / "fresh.jpg"
+    old.write_bytes(b"x" * 10)
+    fresh.write_bytes(b"x" * 20)
+    os.utime(old, (1, 1))
+    assert prune_thumbnails() == 1 and not old.exists() and fresh.exists()
+    duration_cache_file().write_text("{}")
+    assert clear_caches() == 22 and not fresh.exists() and not duration_cache_file().exists()

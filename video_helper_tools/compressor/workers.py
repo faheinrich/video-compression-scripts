@@ -537,6 +537,8 @@ class ThumbnailRunnable(QRunnable):
             thumb_path = get_thumbnail_path(self.video_path)
             if not thumb_path.exists():
                 generate_thumbnail(self.video_path, thumb_path)
+            else:
+                os.utime(thumb_path)  # used recently: keeps it out of prune_thumbnails
             if thumb_path.exists():
                 image = QImage(str(thumb_path))
         except Exception as e:

@@ -1,3 +1,6 @@
+# Single source of the version shown in the About dialog; a test keeps it equal to pyproject.toml.
+__version__ = "1.0.0"
+
 import os
 
 # Decode video in software in Qt's players. With VideoToolbox, Qt reports "Unknown error

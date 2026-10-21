@@ -3,9 +3,10 @@ import json
 import subprocess
 import re
 import hashlib
+import time
 from pathlib import Path
 
-from video_helper_tools.core.paths import thumbnail_dir
+from video_helper_tools.core.paths import duration_cache_file, thumbnail_dir
 
 def format_size(size_bytes):
     is_negative = size_bytes < 0
@@ -38,8 +39,44 @@ def parse_excludes(text):
 
 
 def get_thumbnail_path(video_path):
-    video_hash = hashlib.md5(str(video_path).encode()).hexdigest()
+    # Size and mtime are part of the key so a replaced file does not keep showing the old picture.
+    try:
+        stat = Path(video_path).stat()
+        stamp = f"{stat.st_size}:{stat.st_mtime_ns}"
+    except OSError:
+        stamp = ""
+    video_hash = hashlib.md5(f"{video_path}|{stamp}".encode()).hexdigest()
     return thumbnail_dir() / f"{video_hash}.jpg"
+
+
+THUMBNAIL_MAX_AGE_DAYS = 90
+
+
+def prune_thumbnails(max_age_days=THUMBNAIL_MAX_AGE_DAYS):
+    """Deletes thumbnails not written for a long time (changed or deleted videos leave orphans); returns the count."""
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for thumb in thumbnail_dir().glob("*.jpg"):
+        try:
+            if thumb.stat().st_mtime < cutoff:
+                thumb.unlink()
+                removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def clear_caches():
+    """Deletes all thumbnails and the duration cache; returns the number of bytes freed."""
+    freed = 0
+    for path in [*thumbnail_dir().glob("*.jpg"), duration_cache_file()]:
+        try:
+            size = path.stat().st_size
+            path.unlink()
+            freed += size
+        except OSError:
+            pass
+    return freed
 
 def generate_thumbnail(video_path, output_path):
     # One second in avoids black first frames; clips shorter than that fall back to the

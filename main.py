@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 from PySide6.QtGui import QAction, QFont, QFontDatabase, QIcon, QKeySequence, QPixmap
+from video_helper_tools import __version__
 from PySide6.QtCore import Qt, QSize
 
 from video_helper_tools.compressor.gui import ArchiverGUI
@@ -304,7 +305,7 @@ class VideoHelperToolsSuite(QMainWindow):
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle(tr("About Video Helper Tools"))
-        msg.setText(tr("<h2>Video Helper Tools</h2><p>A suite of tools for video processing, including compression, syncing, and transcription.</p><p>Version: {version}</p>", version="1.0.0"))
+        msg.setText(tr("<h2>Video Helper Tools</h2><p>A suite of tools for video processing, including compression, syncing, and transcription.</p><p>Version: {version}</p>", version=__version__))
         msg.exec()
 
     def change_language(self, index):

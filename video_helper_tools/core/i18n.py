@@ -325,6 +325,11 @@ GERMAN = {
     'Choose a source and a target folder first.': 'Wähle zuerst einen Quell- und einen Zielordner.',
     'Nothing to do: all videos already have a result. Turn on “Overwrite existing results” to compress them again.':
         'Nichts zu tun: Alle Videos haben schon ein Ergebnis. Aktiviere „Vorhandene Ergebnisse überschreiben“, um sie erneut zu komprimieren.',
+    'Clear thumbnail and duration cache': 'Vorschaubilder- und Dauer-Cache leeren',
+    'Cache': 'Cache',
+    'Cache cleared ({size} freed). Thumbnails and durations are read again at the next scan.':
+        'Cache geleert ({size} frei). Vorschaubilder und Dauern werden beim nächsten Scan neu gelesen.',
+    'Reading durations: {done} of {total}…': 'Dauern werden gelesen: {done} von {total}…',
     'Start sync': 'Sync starten',
     'Stop sync': 'Sync stoppen',
     'Select source folder': 'Quellordner auswählen',
