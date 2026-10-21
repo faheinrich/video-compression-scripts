@@ -5,12 +5,14 @@ import time
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFileDialog, QMessageBox, QTextEdit,
-    QFrame, QProgressBar, QStyle,
+    QFrame, QProgressBar, QStyle, QCheckBox,
 )
-from PySide6.QtCore import QProcess, QTimer
+from PySide6.QtCore import QProcess, Qt, QTimer
 from PySide6.QtGui import QFontDatabase
 
 from video_helper_core.i18n import tr
+from video_helper_core.keep_awake import KeepAwake
+from video_helper_core.notify import notify
 from video_helper_core.style import STYLE, caption
 
 RSYNC_ARGS = ["-av", "--del", "--partial", "--progress", "--modify-window=1", "--size-only"]
@@ -26,6 +28,9 @@ class RsyncSyncGUI(QWidget):
         super().__init__()
         self.files_done = 0
         self.started_at = 0.0
+        self.keep_awake = KeepAwake(reason="A backup is running")
+        self.notifier = notify   # replaced in tests
+        self.stopped_by_user = False
         self.init_ui()
 
     def folder_field(self, title, placeholder, on_browse):
@@ -60,7 +65,15 @@ class RsyncSyncGUI(QWidget):
         header.addLayout(tgt_column, 1)
         self.sync_btn = QPushButton(tr("Start sync"), objectName="runButton")
         self.sync_btn.clicked.connect(self.toggle_sync)
-        header.addWidget(self.sync_btn)
+        run_column = QVBoxLayout()
+        run_column.addStretch()
+        run_column.addWidget(self.sync_btn)
+        self.cb_keep_awake = QCheckBox(tr("Keep computer awake"))
+        self.cb_keep_awake.setToolTip(tr("Prevents sleep while the backup is running."))
+        self.cb_keep_awake.setChecked(False)
+        self.cb_keep_awake.toggled.connect(self.update_keep_awake)
+        run_column.addWidget(self.cb_keep_awake, 0, Qt.AlignRight)
+        header.addLayout(run_column)
         layout.addLayout(header)
 
         info_label = QLabel(tr("Mirrors a folder to a backup location (e.g. an external drive) with rsync.\nOptions: {options}", options=" ".join(RSYNC_ARGS)))
@@ -188,10 +201,19 @@ class RsyncSyncGUI(QWidget):
 
         args = [*RSYNC_ARGS, src, tgt]
         self.append_log(tr("Running command: {command}", command="rsync " + " ".join(args)))
+        self.stopped_by_user = False
         self.process.start("rsync", args)
+        self.update_keep_awake()
+
+    def update_keep_awake(self):
+        if self.process.state() != QProcess.NotRunning and self.cb_keep_awake.isChecked():
+            self.keep_awake.start()
+        else:
+            self.keep_awake.stop()
 
     def stop_sync(self):
         if self.process.state() == QProcess.Running:
+            self.stopped_by_user = True
             self.process.kill()
             self.append_log(tr("Process stopped by user."))
 
@@ -220,6 +242,7 @@ class RsyncSyncGUI(QWidget):
         self.append_log(data, "<font color='red'>{}</font>")
 
     def process_finished(self, exitCode, exitStatus):
+        self.keep_awake.stop()
         self.timer.stop()
         self.update_elapsed()
         self.set_run_mode(False)
@@ -230,3 +253,5 @@ class RsyncSyncGUI(QWidget):
         else:
             self.set_status(tr("Error"), "warn")
             self.append_log(tr("Sync finished with exit code {code}.", code=exitCode), "<b>{}</b>")
+        if not self.stopped_by_user:
+            self.notifier(self.window(), tr("Backup (rsync)"), tr("Done") if exitStatus == QProcess.NormalExit and exitCode == 0 else tr("Error"))

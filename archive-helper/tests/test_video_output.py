@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -288,3 +289,100 @@ def test_example_video_is_smaller_and_equally_long(qapp, tmp_path):
     assert get_video_info(out)[0] == pytest.approx(get_video_info(src / "ex.mp4")[0], abs=0.3)
     assert data["ratio"] < 100
     assert streams(out, "video")[0]["height"] <= 480
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="reads the POSIX nice value")
+@pytest.mark.parametrize("low_priority,expected", [(True, 10), (False, 0)])
+def test_encoder_runs_with_lower_priority_when_asked(qapp, tmp_path, low_priority, expected):
+    from archive_helper.compressor.utils import get_video_info
+    from archive_helper.compressor.workers import ArchiveWorker
+
+    src = tmp_path / "src"
+    src.mkdir()
+    clip = make_clip(src / "a.mp4", size="1280x720", seconds=4)
+    worker = ArchiveWorker(src, tmp_path / "dst", 1, [], {**BASE_SETTINGS, "low_priority": low_priority})
+    duration, fps, audio = get_video_info(clip)
+    proc, error, message, _ = worker.start_video_process(clip, tmp_path / "dst" / "a_archived.mp4", duration, fps, audio)
+    assert proc is not None, f"{error}: {message}"
+    nice = int(subprocess.run(["ps", "-o", "nice=", "-p", str(proc.pid)], capture_output=True, text=True).stdout.strip() or "-99")
+    proc.communicate(timeout=120)
+    assert nice == expected
+
+
+# --- results are written to a partial file first ----------------------------------------------------------------------
+
+def run_worker(qapp, src, dst, replace_source=False, **overrides):
+    from archive_helper.compressor.utils import get_video_info
+    from archive_helper.compressor.workers import ArchiveWorker
+
+    worker = ArchiveWorker(src.parent, dst.parent, 1, [], {**BASE_SETTINGS, **overrides})
+    duration, fps, audio = get_video_info(src)
+    proc, error, message, _ = worker.start_video_process(src, dst, duration, fps, audio, replace_source=replace_source)
+    assert proc is not None, f"{error}: {message}"
+    proc.communicate(timeout=180)
+    return worker.finalize_video_process(proc, src, dst, replace_source=replace_source)
+
+
+def video_codec(path):
+    return streams(path, "video")[0]["codec_name"]
+
+
+def test_source_equals_target_replaces_the_original_with_the_smaller_compressed_file(qapp, tmp_path):
+    from archive_helper.compressor.utils import partial_path
+
+    clip = make_clip(tmp_path / "clip.mp4", size="1920x1080", seconds=3)
+    before = clip.stat().st_size
+    assert video_codec(clip) == "h264"
+    message, data = run_worker(qapp, clip, clip, replace_source=True)
+    assert message.startswith("✅") and video_codec(clip) == "hevc"
+    assert clip.stat().st_size < before and data["src_size"] == before and data["dst_size"] == clip.stat().st_size
+    assert not partial_path(clip).exists()
+
+
+def test_a_replacement_that_is_not_smaller_keeps_the_original(qapp, tmp_path):
+    clip = make_clip(tmp_path / "tiny.mp4", size="64x64", seconds=1, extra=["-b:v", "20k"])
+    original = clip.read_bytes()
+    message, data = run_worker(qapp, clip, clip, replace_source=True, crf=5)
+    assert message.startswith("✅") and "ORIGINAL BEHALTEN" in message
+    assert clip.read_bytes() == original and data["dst_size"] == data["src_size"]
+    assert not list(tmp_path.glob("*.partial*"))
+
+
+def test_a_failed_run_leaves_an_existing_result_untouched(qapp, tmp_path):
+    from archive_helper.compressor.utils import partial_path
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "broken.mp4").write_bytes(b"this is not a video")
+    dst = tmp_path / "dst" / "broken_archived.mp4"
+    dst.parent.mkdir()
+    dst.write_bytes(b"earlier result")
+    from archive_helper.compressor.workers import ArchiveWorker
+
+    worker = ArchiveWorker(src, dst.parent, 1, [], {**BASE_SETTINGS, "overwrite": True})
+    proc, error, message, _ = worker.start_video_process(src / "broken.mp4", dst, None, None, None)
+    assert proc is not None
+    proc.communicate(timeout=60)
+    message, data = worker.finalize_video_process(proc, src / "broken.mp4", dst)
+    assert message.startswith("❌") and dst.read_bytes() == b"earlier result" and not partial_path(dst).exists()
+
+
+def test_aborting_a_run_removes_only_the_unfinished_file(qapp, tmp_path):
+    from archive_helper.compressor.utils import partial_path
+    from archive_helper.compressor.workers import ArchiveWorker
+
+    (tmp_path / "src").mkdir()
+    clip = make_clip(tmp_path / "src" / "clip.mp4", size="1920x1080", seconds=6)
+    dst = tmp_path / "dst" / "clip_archived.mp4"
+    dst.parent.mkdir()
+    dst.write_bytes(b"earlier result")
+    from archive_helper.compressor.utils import get_video_info
+
+    worker = ArchiveWorker(clip.parent, dst.parent, 1, [], {**BASE_SETTINGS, "overwrite": True, "preset": "veryslow"})
+    duration, fps, audio = get_video_info(clip)
+    proc, error, message, _ = worker.start_video_process(clip, dst, duration, fps, audio)
+    assert proc is not None
+    worker.active_processes = [(proc, clip, dst, duration, b"")]
+    worker.kill_all_processes()
+    proc.wait(timeout=30)
+    assert dst.read_bytes() == b"earlier result" and not partial_path(dst).exists()

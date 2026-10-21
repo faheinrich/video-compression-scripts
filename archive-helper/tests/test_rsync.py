@@ -126,3 +126,82 @@ def test_elapsed_time_format(rsync):
     rsync.started_at = time.monotonic() - 65
     rsync.update_elapsed()
     assert rsync.values["elapsed"].text() == "1:05"
+
+
+class FakeKeepAwake:
+    def __init__(self):
+        self.starts = self.stops = 0
+
+    def start(self):
+        self.starts += 1
+
+    def stop(self):
+        self.stops += 1
+
+
+@pytest.mark.skipif(not shutil.which("rsync"), reason="rsync not installed")
+def test_backup_keeps_the_computer_awake_and_reports_the_end(rsync, tmp_path, monkeypatch):
+    confirm(monkeypatch)
+    src, tgt = tmp_path / "src", tmp_path / "tgt"
+    src.mkdir()
+    tgt.mkdir()
+    (src / "a.txt").write_text("a")
+    rsync.src_edit.setText(str(src))
+    rsync.tgt_edit.setText(str(tgt))
+    rsync.keep_awake = FakeKeepAwake()
+    rsync.cb_keep_awake.setChecked(True)
+    rsync.keep_awake.stops = 0   # ticking the box while idle only released nothing
+    notified = []
+    rsync.notifier = lambda *args: notified.append(args[1:])
+
+    rsync.start_sync()
+    assert rsync.keep_awake.starts == 1
+    wait_for(rsync.process.finished)
+    spin(50)
+    assert rsync.keep_awake.stops == 1 and notified == [("Backup (rsync)", "Fertig")]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses the POSIX sleep command")
+def test_stopping_a_backup_by_hand_sends_no_notification(rsync, tmp_path, monkeypatch):
+    from PySide6.QtCore import QProcess
+
+    confirm(monkeypatch)
+    src, tgt = tmp_path / "src", tmp_path / "tgt"
+    src.mkdir()
+    tgt.mkdir()
+    rsync.src_edit.setText(str(src))
+    rsync.tgt_edit.setText(str(tgt))
+    rsync.keep_awake = FakeKeepAwake()
+    rsync.cb_keep_awake.setChecked(True)
+    rsync.keep_awake.stops = 0   # ticking the box while idle only released nothing
+    notified = []
+    rsync.notifier = lambda *args: notified.append(args)
+    monkeypatch.setattr(rsync.process, "start", lambda program, args: QProcess.start(rsync.process, "sleep", ["30"]))
+    rsync.start_sync()
+    while rsync.process.state() != QProcess.Running:
+        spin(10)
+    rsync.stop_sync()
+    wait_for(rsync.process.finished)
+    spin(50)
+    assert notified == [] and rsync.keep_awake.stops == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses the POSIX sleep command")
+def test_backup_keep_awake_checkbox_decides(rsync, tmp_path, monkeypatch):
+    from PySide6.QtCore import QProcess
+
+    confirm(monkeypatch)
+    src, tgt = tmp_path / "src", tmp_path / "tgt"
+    src.mkdir()
+    tgt.mkdir()
+    rsync.src_edit.setText(str(src))
+    rsync.tgt_edit.setText(str(tgt))
+    rsync.keep_awake = FakeKeepAwake()
+    monkeypatch.setattr(rsync.process, "start", lambda program, args: QProcess.start(rsync.process, "sleep", ["30"]))
+    assert not rsync.cb_keep_awake.isChecked()       # off unless the user asks for it
+    rsync.start_sync()
+    assert rsync.keep_awake.starts == 0
+    rsync.cb_keep_awake.setChecked(True)
+    assert rsync.keep_awake.starts == 1
+    rsync.stop_sync()
+    wait_for(rsync.process.finished)

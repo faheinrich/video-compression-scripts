@@ -19,6 +19,9 @@ from .model import (
     COL_DURATION, COL_FILE, COL_RESULT, COL_SETTINGS, COL_SIZE, COL_STATUS,
     FileDelegate, StatusDelegate, VideoFilterProxy, VideoRow, VideoTableModel,
 )
+from video_helper_core.dialogs import confirm_after_delay
+from video_helper_core.keep_awake import KeepAwake
+from video_helper_core.notify import notify
 from .utils import (
     DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, clear_caches, format_size, open_in_finder, parse_excludes,
     prune_thumbnails,
@@ -165,6 +168,10 @@ class ArchiverGUI(QWidget):
         self.scan_timer.timeout.connect(self.auto_scan)
         self.summary_timer = QTimer(self, singleShot=True, interval=200)
         self.summary_timer.timeout.connect(self.refresh_summary)
+        self.keep_awake = KeepAwake(reason="Videos are being compressed")
+        self.notifier = notify   # replaced in tests
+        self.stopped_by_user = False
+        self.paused_at = None
         self.eta_timer = QTimer(self, interval=1000)
         self.eta_timer.timeout.connect(self.refresh_summary)
 
@@ -282,10 +289,20 @@ class ArchiverGUI(QWidget):
         more.setMenu(menu)
         self.btn_run = QPushButton(objectName="runButton")
         self.btn_run.clicked.connect(self.toggle_run)
+        self.btn_pause = QPushButton(tr("Pause"))
+        self.btn_pause.setToolTip(tr("Freezes the running encodes; they continue where they stopped."))
+        self.btn_pause.clicked.connect(self.toggle_pause)
+        self.btn_pause.hide()
         buttons.addWidget(self.btn_settings)
         buttons.addWidget(more)
+        buttons.addWidget(self.btn_pause)
         buttons.addWidget(self.btn_run)
         actions.addLayout(buttons)
+        self.cb_keep_awake = QCheckBox(tr("Keep computer awake"))
+        self.cb_keep_awake.setToolTip(tr("Prevents sleep while videos are being compressed (not while paused)."))
+        self.cb_keep_awake.setChecked(False)
+        self.cb_keep_awake.toggled.connect(self.update_keep_awake)
+        actions.addWidget(self.cb_keep_awake, 0, Qt.AlignRight)
         header.addLayout(actions)
         return header
 
@@ -458,9 +475,9 @@ class ArchiverGUI(QWidget):
         self.quality_hint = QLabel()
         self.quality_hint.setProperty("role", "hint")
         self.quality_hint.setWordWrap(True)
-        # Room for the longest text (three lines), so the controls below do not jump when the slider
+        # Room for the longest text (two lines), so the controls below do not jump when the slider
         # passes a preset and the hint gets longer.
-        self.quality_hint.setMinimumHeight(self.quality_hint.fontMetrics().lineSpacing() * 3)
+        self.quality_hint.setMinimumHeight(self.quality_hint.fontMetrics().lineSpacing() * 2)
         self.quality_hint.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         quality.addWidget(self.quality_hint)
         layout.addLayout(quality)
@@ -558,9 +575,12 @@ class ArchiverGUI(QWidget):
         self.cb_overwrite.setToolTip(tr("Videos that already have a result in the target folder are compressed again."))
         self.cb_overwrite.toggled.connect(self.update_run_enabled)
         self.cb_overwrite.toggled.connect(self.request_summary)
+        self.cb_low_priority = QCheckBox(tr("Low priority"))
+        self.cb_low_priority.setToolTip(tr("Encodes with lower priority so the computer stays responsive; the run may take a little longer."))
+        self.cb_low_priority.setChecked(True)
         self.cb_dry_run = QCheckBox(tr("Test run (first second only)"))
         self.cb_dry_run.setToolTip(tr("Compresses only the first second of each video to check the settings quickly."))
-        for box in (self.cb_copy_aac, self.cb_flatten, self.cb_overwrite, self.cb_dry_run):
+        for box in (self.cb_copy_aac, self.cb_flatten, self.cb_overwrite, self.cb_low_priority, self.cb_dry_run):
             adv.addWidget(box)
 
         adv.addWidget(caption(tr("Names")))
@@ -652,6 +672,7 @@ class ArchiverGUI(QWidget):
 
     def shutdown(self):
         self.scan_timer.stop()
+        self.keep_awake.stop()
         for worker in (self.worker, self.scan_worker, self.duration_worker, self.settings_worker):
             if worker is not None and worker.isRunning():
                 if hasattr(worker, "stop"):
@@ -659,6 +680,8 @@ class ArchiverGUI(QWidget):
                 worker.wait()
 
     def set_run_mode(self, running):
+        self.btn_pause.setVisible(running)
+        self.btn_pause.setText(tr("Pause"))
         self.btn_run.setProperty("mode", "stop" if running else "start")
         self.btn_run.setText(tr("Stop") if running else tr("Start archiving"))
         self.btn_run.setIcon(self.style().standardIcon(QStyle.SP_MediaStop if running else QStyle.SP_MediaPlay))
@@ -745,6 +768,7 @@ class ArchiverGUI(QWidget):
                 src=item['path'], dst=item['dst_path'], size=item['size'], root=src_root,
                 status="exists" if exists else "planned",
                 out_size=item['comp_size'] if exists else None,
+                conflict=bool(item.get('conflict')),
             ))
         counts = {}
         for row in rows:
@@ -814,6 +838,14 @@ class ArchiverGUI(QWidget):
     def start_archiving(self):
         if self.is_archiving() or not self.queue_items():
             return
+        replacing = [item for item in self.queue_items() if item.get('conflict')]
+        if replacing and not confirm_after_delay(
+                self, tr("Source = target!"),
+                tr("{count} videos have the same source and target file. If you continue, these original files are "
+                   "REPLACED by their compressed versions and the originals are gone.\n\nCancel and set a result "
+                   "postfix or another target folder to keep them.", count=len(replacing)),
+                tr("Replace originals")):
+            return
         if self.cb_overwrite.isChecked():
             reply = QMessageBox.question(
                 self, tr("Overwrite existing results?"),
@@ -834,6 +866,7 @@ class ArchiverGUI(QWidget):
             'overwrite': self.cb_overwrite.isChecked(),
             'copy_aac': self.cb_copy_aac.isChecked(),
             'dry_run': self.cb_dry_run.isChecked(),
+            'low_priority': self.cb_low_priority.isChecked(),
         }
         queue = self.queue_items()
         for item in queue:  # re-runs (overwrite, retry) start from a clean row
@@ -850,13 +883,43 @@ class ArchiverGUI(QWidget):
         # QThread.finished, not finished_all: the latter is emitted while the thread still
         # runs, so the controls would still treat the run as active.
         self.worker.finished.connect(self.on_finished_all)
+        self.stopped_by_user = False
+        self.paused_at = None
         self.worker.start()
+        self.update_keep_awake()
         self.set_run_mode(True)
         self.eta_timer.start()
         self.refresh_summary()
 
+    def update_keep_awake(self):
+        """Awake while a run is going and not paused, and only if the box next to Start is ticked."""
+        if self.is_archiving() and not self.worker.paused and self.cb_keep_awake.isChecked():
+            self.keep_awake.start()
+        else:
+            self.keep_awake.stop()
+
+    def is_paused(self):
+        return self.is_archiving() and self.worker.paused
+
+    def toggle_pause(self):
+        if not self.is_archiving():
+            return
+        if self.worker.paused:
+            self.run_started += time.monotonic() - self.paused_at   # paused time does not count for the estimate
+            self.paused_at = None
+            self.worker.resume()
+            self.update_keep_awake()
+            self.btn_pause.setText(tr("Pause"))
+        else:
+            self.paused_at = time.monotonic()
+            self.worker.pause()
+            self.update_keep_awake()                                # nothing runs, the computer may sleep
+            self.btn_pause.setText(tr("Resume"))
+        self.refresh_summary()
+
     def stop_archiving(self):
         if self.is_archiving():
+            self.stopped_by_user = True
             self.btn_run.setEnabled(False)
             self.worker.stop()
             self.worker.wait()
@@ -907,8 +970,20 @@ class ArchiverGUI(QWidget):
             if row.status == "running":
                 self.model.update(row.src, status="planned", progress=0, speed="")
         self.eta_timer.stop()
+        self.keep_awake.stop()
         self.set_run_mode(False)
         self.refresh_summary()
+        if not self.stopped_by_user:
+            self.notify_finished()
+
+    def notify_finished(self):
+        run = [r for r in self.model.rows if str(r.src) in self.run_paths]
+        done = sum(1 for r in run if r.status in ("done", "skipped"))
+        errors = sum(1 for r in run if r.status == "error")
+        message = tr("{done} of {total} finished", done=done, total=len(run))
+        if errors:
+            message += " · " + tr("{count} with errors.", count=errors)
+        self.notifier(self.window(), tr("Archive Helper"), message)
 
     # ---------------------------------------------------------------- summary
     def refresh_summary(self):
@@ -942,7 +1017,9 @@ class ArchiverGUI(QWidget):
             total = sum(r.size for r in measured) + planned_bytes
             caption_label.setText((tr("Savings (estimated)") if estimate else tr("Savings")).upper())
             prefix = "≈ " if estimate else ""
-            self.set_summary("saving", f"{prefix}{-saved / total * 100:+.0f} % · {format_size(saved)}",
+            percent = abs(saved) / total * 100
+            wording = tr("{percent:.0f} % smaller → {size}") if saved >= 0 else tr("{percent:.0f} % larger → {size}")
+            self.set_summary("saving", prefix + wording.format(percent=percent, size=format_size(abs(saved))),
                              tone="good" if saved >= 0 else "warn",
                              tooltip=tr("Based on the videos already compressed (ratio {ratio:.0%}).", ratio=ratio))
 
@@ -984,6 +1061,8 @@ class ArchiverGUI(QWidget):
         done_bytes = sum(r.size for r in finished) + sum(r.size * r.progress / 100 for r in run_rows if r.status == "running")
         self.progress_bar.setValue(int(done_bytes / self.run_bytes * 1000) if self.run_bytes else 0)
 
+        if self.is_paused():
+            return tr("Paused: {done} of {total} finished", done=len(finished), total=len(run_rows))
         if self.is_archiving():
             text = tr("{done} of {total} finished", done=len(finished), total=len(run_rows))
             elapsed = time.monotonic() - self.run_started
@@ -1001,6 +1080,9 @@ class ArchiverGUI(QWidget):
             if errors:
                 parts.append(tr("{count} with errors.", count=errors))
         queue = self.queue_items()
+        conflicts = sum(1 for item in queue if item.get('conflict'))
+        if conflicts:
+            parts.append(tr("⚠ {count} with source = target!", count=conflicts))
         replacing = sum(1 for item in queue if self.model.row_for(item['path']).out_size is not None)
         if queue and replacing:
             parts.append(tr("Ready: {count} to compress, {replacing} of them replace an existing result. Order: as sorted in the table.",
@@ -1193,6 +1275,8 @@ class ArchiverGUI(QWidget):
             'postfix': self.txt_postfix.text(),
             'excludes': self.txt_excludes.text(),
             'overwrite': self.cb_overwrite.isChecked(),
+            'low_priority': self.cb_low_priority.isChecked(),
+            'keep_awake': self.cb_keep_awake.isChecked(),
             'dry_run': self.cb_dry_run.isChecked(),
         }
         try:
@@ -1237,6 +1321,8 @@ class ArchiverGUI(QWidget):
         if 'postfix' in defaults: self.txt_postfix.setText(defaults['postfix'])
         if 'excludes' in defaults: self.txt_excludes.setText(defaults['excludes'])
         if 'overwrite' in defaults: self.cb_overwrite.setChecked(defaults['overwrite'])
+        if 'low_priority' in defaults: self.cb_low_priority.setChecked(defaults['low_priority'])
+        if 'keep_awake' in defaults: self.cb_keep_awake.setChecked(defaults['keep_awake'])
         if 'dry_run' in defaults: self.cb_dry_run.setChecked(defaults['dry_run'])
         # Paths last: setting them schedules the automatic scan.
         if 'src_dir' in defaults: self.txt_src.setText(defaults['src_dir'])

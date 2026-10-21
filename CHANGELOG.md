@@ -16,6 +16,21 @@ All notable changes to the two apps and the shared core. The format follows
   an unsigned app on macOS 15 and later (System Settings > Privacy & Security > Open Anyway).
 
 ### Archive Helper
+- New: **Pause / Resume** for a running compression (the encodes are frozen, paused time does not count for the
+  estimate); encodes run with lower priority by default (setting "Low priority" under Advanced).
+- New: a checkbox "Keep computer awake" next to Start prevents sleep during a compression or backup.
+- New: when a run or backup is finished (not when you stopped it) the Dock icon bounces and a notification appears if the
+  window is not in front.
+- Changed: the savings read "89 % smaller → 4.36 GB" instead of a negative percentage; long paths in the folder fields
+  are shortened in the middle (full path as tooltip).
+- New: **source = target is never silent.** Such a video stays in the list with a red "Source = target!" status; before
+  the start a warning (confirm button locked for 5 seconds) says that the originals will be replaced. Results are written
+  to a `.partial` file first and renamed when complete, so an abort never destroys an existing file; a replacement that is
+  not smaller keeps the original.
+- Changed: when two sources would get the same target name (`test.mov` and `test.mp4`), both keep their extension in
+  the name (`test.mov_archived.mp4`, `test.mp4_archived.mp4`).
+- "Keep computer awake" is off by default.
+- Planned: drag and drop and "Inspect different compressions" (see `docs/PLAN_DRAG_DROP_UND_TEST_COMPRESSION.md`).
 - Fixed: on macOS the native window title was drawn over the back button in the title bar and probably swallowed
   clicks on it. The native title is left empty there.
 - Fixed: the quality hint under the Small / Archive / High buttons changed its length and moved the controls below it

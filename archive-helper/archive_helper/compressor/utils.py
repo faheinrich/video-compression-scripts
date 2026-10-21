@@ -33,6 +33,27 @@ def clean_postfix(text):
     return re.sub(r'[\\/:\x00-\x1f]', "", text).strip()
 
 
+def path_key(path):
+    """Paths with the same key name the same file on a case-insensitive file system (macOS, Windows)."""
+    return os.path.normcase(str(path)).lower()
+
+
+def same_file(a, b):
+    """True when both paths are the same file: equal after case folding, or the same inode (links)."""
+    if path_key(a) == path_key(b):
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def partial_path(dst):
+    """Where a result is written first; it only gets its real name once it is complete."""
+    dst = Path(dst)
+    return dst.with_name(f"{dst.stem}.partial{dst.suffix}")
+
+
 def parse_excludes(text):
     """Name endings (without extension, case-insensitive) of source videos to skip."""
     return tuple(part.lower() for part in re.split(r"[,;\s]+", text) if part)

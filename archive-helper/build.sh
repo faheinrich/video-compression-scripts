@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 echo "Starting build process for Archive Helper..."
 
 # One environment for the whole workspace; only this app's dependencies and the dev tools are installed.
-(cd .. && uv sync --package archive-helper --group dev)
+(cd .. && uv sync --inexact --package archive-helper --group dev)
 
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then SEP=";"; else SEP=":"; fi
 

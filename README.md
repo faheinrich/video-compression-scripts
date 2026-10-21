@@ -32,6 +32,7 @@ uv sync --all-packages              # one environment with everything, including
 uv run pytest core/tests archive-helper/tests analysis-helper/tests    # run each folder separately in CI
 ```
 
+Building an app (`build.sh`) uses `uv sync --inexact`, so it does not remove the other packages from this environment.
 FFmpeg and ExifTool are needed for most tests (they are skipped when missing).
 
 ## Releases

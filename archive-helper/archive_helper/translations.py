@@ -238,4 +238,23 @@ register_german({
         '<h2>Archive Helper</h2><p>Videos für das Archiv komprimieren und Ordner mit rsync sichern.</p><p>Version: {version}</p>',
     'Please stop running jobs first (compression or rsync), then change the language.':
         'Bitte beende zuerst laufende Aufträge (Komprimierung oder rsync) und ändere dann die Sprache.',
+    '{percent:.0f} % smaller → {size}': '{percent:.0f} % kleiner → {size}',
+    '{percent:.0f} % larger → {size}': '{percent:.0f} % größer → {size}',
+    'Low priority': 'Niedrige Priorität',
+    'Encodes with lower priority so the computer stays responsive; the run may take a little longer.': 'Kodiert mit niedrigerer Priorität, damit der Rechner bedienbar bleibt; der Lauf kann etwas länger dauern.',
+    'Pause': 'Pause',
+    'Resume': 'Fortsetzen',
+    'Freezes the running encodes; they continue where they stopped.': 'Hält die laufenden Kodierungen an; sie machen danach an derselben Stelle weiter.',
+    'Paused: {done} of {total} finished': 'Pausiert: {done} von {total} fertig',
+    'Archive Helper': 'Archive Helper',
+    'Keep computer awake': 'Rechner wach halten',
+    'Prevents sleep while videos are being compressed (not while paused).': 'Verhindert den Ruhezustand, solange Videos komprimiert werden (nicht während der Pause).',
+    'Prevents sleep while the backup is running.': 'Verhindert den Ruhezustand, solange das Backup läuft.',
+    '⚠ Source = target!': '⚠ Quelle = Ziel!',
+    'Source = target!': 'Quelle = Ziel!',
+    '{count} videos have the same source and target file. If you continue, these original files are REPLACED by their compressed versions and the originals are gone.\n\nCancel and set a result postfix or another target folder to keep them.':
+        '{count} Videos haben dieselbe Quell- und Zieldatei. Wenn du fortfährst, werden diese Originale durch ihre komprimierten Versionen ERSETZT und sind danach weg.\n\nBreche ab und setze ein Postfix für das Ergebnis oder einen anderen Zielordner, um sie zu behalten.',
+    'Replace originals': 'Originale ersetzen',
+    '⚠ {count} with source = target!': '⚠ {count} mit Quelle = Ziel!',
+    '✅ KEPT ORIGINAL: {name} | the compressed file was not smaller': '✅ ORIGINAL BEHALTEN: {name} | die komprimierte Datei war nicht kleiner',
 })

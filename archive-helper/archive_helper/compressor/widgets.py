@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QDialog, QSlider,
-    QGraphicsView, QGraphicsScene, QMessageBox, QSizePolicy
+    QGraphicsView, QGraphicsScene, QMessageBox, QSizePolicy, QStyle, QStyleOptionFrame
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, QUrl, QSizeF, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QPainter, QPalette, QShortcut
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
@@ -25,9 +25,33 @@ def format_clock(ms):
 
 
 class DropLineEdit(QLineEdit):
+    """Path field that accepts a dropped folder. While not being edited, a path too long for the field is shown with
+    the middle shortened, so both its start and its last folder stay visible; the tooltip has the whole path."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setAcceptDrops(True)
+        self.textChanged.connect(self.setToolTip)
+
+    def elided_text(self):
+        """The text to show instead of the real one, or None when it fits or the field is being edited."""
+        if self.hasFocus() or not self.text():
+            return None
+        rect = self.contentsRect().adjusted(4, 0, -4, 0)
+        if self.fontMetrics().horizontalAdvance(self.text()) <= rect.width():
+            return None
+        return self.fontMetrics().elidedText(self.text(), Qt.ElideMiddle, rect.width())
+
+    def paintEvent(self, event):
+        shown = self.elided_text()
+        if shown is None:
+            return super().paintEvent(event)
+        painter = QPainter(self)
+        option = QStyleOptionFrame()
+        self.initStyleOption(option)
+        self.style().drawPrimitive(QStyle.PE_PanelLineEdit, option, painter, self)
+        painter.setPen(self.palette().color(QPalette.Text))
+        painter.drawText(self.contentsRect().adjusted(4, 0, -4, 0), int(Qt.AlignVCenter | Qt.AlignLeft), shown)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():

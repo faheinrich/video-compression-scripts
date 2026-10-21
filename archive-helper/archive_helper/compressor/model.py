@@ -24,10 +24,14 @@ STATUS_COLORS = {
     "error": QColor(198, 63, 53),
 }
 
+CONFLICT_COLOR = QColor(198, 63, 53)   # red: the result would replace the original
+
 COL_FILE, COL_DURATION, COL_SIZE, COL_RESULT, COL_SETTINGS, COL_STATUS = range(6)
 
 
 def status_label(row):
+    if row.conflict and row.status in ("planned", "error"):
+        return tr("⚠ Source = target!")
     label = _status_label(row)
     return f"⚠ {tr('Duplicate target name')} · {label}" if row.duplicate else label
 
@@ -84,6 +88,7 @@ class VideoRow:
     speed: str = ""
     note: str = ""
     duplicate: bool = False  # another source file maps to the same target name
+    conflict: bool = False  # the target is a source video: the result would replace the original
     moved_up: bool = False  # processed before the table order ("Process next")
     settings: dict | None = None  # stored in the result file; None for results made before this existed
     root: Path | None = None
@@ -336,7 +341,7 @@ class StatusDelegate(QStyledItemDelegate):
 
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing)
-        color = STATUS_COLORS[row.status]
+        color = CONFLICT_COLOR if row.conflict and row.status in ("planned", "error") else STATUS_COLORS[row.status]
         font = QFont(option.font)
         font.setPointSizeF(option.font.pointSizeF() * 0.92)
         font.setWeight(QFont.DemiBold)

@@ -219,9 +219,11 @@ def test_postfix_cannot_leave_the_target_folder_or_overwrite_the_original(qapp, 
     assert {row.dst.parent for row in gui.model.rows} == {tmp_path / "dst"}
     assert {row.dst.name for row in gui.model.rows} == {"clip..x.mp4", "movie..x.mov".replace(".mov", ".mp4")}
 
-    gui.txt_postfix.setText("")  # same folder, same name: would destroy clip.mp4
+    gui.txt_postfix.setText("")  # same folder, same name: clip.mp4 would replace itself, so it is flagged
     scan(qapp, gui, str(src), str(src))
-    assert [row.src.name for row in gui.model.rows] == ["movie.mov"]
+    rows = {row.src.name: row for row in gui.model.rows}
+    assert rows["clip.mp4"].conflict and rows["clip.mp4"].status == "planned"
+    assert not rows["movie.mov"].conflict and rows["movie.mov"].dst.name == "movie.mp4"
 
 
 def test_name_settings_are_saved_as_defaults(qapp, make_gui, tmp_path):
@@ -842,3 +844,333 @@ def test_quality_hint_does_not_change_the_layout_when_the_slider_moves(qapp, mak
         heights.add(gui.quality_hint.height())
         tops.add(gui.combo_renderer.mapTo(gui, gui.combo_renderer.rect().topLeft()).y())
     assert len(heights) == 1 and len(tops) == 1
+
+
+# --- pause, notification, keep awake ----------------------------------------------------------------------------------
+
+class FakeKeepAwake:
+    def __init__(self):
+        self.starts = self.stops = 0
+
+    def start(self):
+        self.starts += 1
+
+    def stop(self):
+        self.stops += 1
+
+
+@pytest.fixture
+def fake_worker(monkeypatch):
+    """An ArchiveWorker that only waits, so pause/stop logic can be tested without ffmpeg."""
+    from PySide6.QtCore import QThread, Signal
+
+    from archive_helper.compressor import gui as gui_module
+
+    class Fake(QThread):
+        progress_step = Signal(int, str)
+        status_update_path = Signal(str, str, str, dict)
+        file_duration_discovered_path = Signal(str, float)
+        file_progress_path = Signal(str, int)
+        ffmpeg_log_line_path = Signal(str, str)
+        finished_all = Signal()
+
+        def __init__(self, src, dst, jobs, queue, settings):
+            super().__init__()
+            self.settings, self.paused, self.stopped = settings, False, False
+
+        def run(self):
+            while not self.stopped:
+                self.msleep(10)
+
+        def stop(self):
+            self.stopped = True
+
+        def pause(self):
+            self.paused = True
+
+        def resume(self):
+            self.paused = False
+
+        def set_queue(self, items):
+            pass
+
+    monkeypatch.setattr(gui_module, "ArchiveWorker", Fake)
+    return Fake
+
+
+def started_gui(qapp, make_gui, tmp_path, fake_worker):
+    from archive_helper.compressor.model import VideoRow
+
+    gui = make_gui()
+    src = tmp_path / "src"
+    src.mkdir()
+    gui.txt_src.setText(str(src))
+    gui.txt_dst.setText(str(tmp_path / "dst"))
+    root = Path(src)
+    rows = [VideoRow(src=root / f"{n}.mp4", dst=tmp_path / "dst" / f"{n}_a.mp4", size=100, root=root) for n in "ab"]
+    gui.scan_items = [{"path": r.src, "dst_path": r.dst, "size": r.size, "exists_compressed": False} for r in rows]
+    gui.model.reset(rows)
+    gui.keep_awake = FakeKeepAwake()
+    gui.notifier = lambda *args: gui.notified.append(args)
+    gui.notified = []
+    return gui
+
+
+def test_pause_freezes_the_run_and_lets_the_computer_sleep(qapp, make_gui, tmp_path, fake_worker):
+    gui = started_gui(qapp, make_gui, tmp_path, fake_worker)
+    gui.cb_keep_awake.setChecked(True)
+    gui.keep_awake.stops = 0   # setting the box while idle only released nothing
+    gui.start_archiving()
+    assert gui.is_archiving() and gui.keep_awake.starts == 1 and not gui.btn_pause.isHidden()
+
+    gui.toggle_pause()
+    assert gui.worker.paused and gui.is_paused() and gui.keep_awake.stops == 1
+    assert gui.btn_pause.text() == "Fortsetzen" and "Pausiert" in gui.progress_text.text()
+
+    gui.toggle_pause()
+    assert not gui.worker.paused and gui.keep_awake.starts == 2 and gui.btn_pause.text() == "Pause"
+    gui.stop_archiving()
+    wait_idle(qapp, gui)
+    assert gui.btn_pause.isHidden()
+
+
+def test_keep_awake_follows_the_checkbox_next_to_start(qapp, make_gui, tmp_path, fake_worker):
+    gui = started_gui(qapp, make_gui, tmp_path, fake_worker)
+    assert not gui.cb_keep_awake.isChecked()          # off unless the user asks for it
+    gui.start_archiving()
+    assert gui.keep_awake.starts == 0                 # off: a run does not keep the computer awake
+    gui.cb_keep_awake.setChecked(True)                # ticking it during the run takes effect at once
+    assert gui.keep_awake.starts == 1
+    gui.cb_keep_awake.setChecked(False)
+    assert gui.keep_awake.stops >= 1
+    gui.cb_keep_awake.setChecked(True)
+    gui.save_defaults()
+    gui.stop_archiving()
+    wait_idle(qapp, gui)
+    assert make_gui().cb_keep_awake.isChecked() is True
+
+
+def test_paused_time_does_not_count_for_the_time_estimate(qapp, make_gui, tmp_path, fake_worker, monkeypatch):
+    gui = started_gui(qapp, make_gui, tmp_path, fake_worker)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    gui.start_archiving()
+    started = gui.run_started
+    clock["now"] += 30
+    gui.toggle_pause()
+    clock["now"] += 600
+    gui.toggle_pause()
+    assert gui.run_started == pytest.approx(started + 600)
+    gui.stop_archiving()
+    wait_idle(qapp, gui)
+
+
+def test_stopping_by_hand_sends_no_notification_and_releases_the_computer(qapp, make_gui, tmp_path, fake_worker):
+    gui = started_gui(qapp, make_gui, tmp_path, fake_worker)
+    gui.start_archiving()
+    gui.stop_archiving()
+    wait_idle(qapp, gui)
+    assert gui.notified == [] and gui.keep_awake.stops >= 1
+
+
+def test_a_finished_run_notifies_with_the_result(qapp, make_gui, tmp_path, fake_worker):
+    gui = started_gui(qapp, make_gui, tmp_path, fake_worker)
+    gui.start_archiving()
+    gui.on_status_update(str(gui.model.rows[0].src), "finished", "", {"src_size": 100, "dst_size": 40})
+    gui.on_status_update(str(gui.model.rows[1].src), "error", "FFmpeg error", {})
+    gui.worker.stopped = True   # the thread ends by itself, as after the last video
+    wait_idle(qapp, gui)
+    assert len(gui.notified) == 1
+    _window, title, message = gui.notified[0]
+    assert title == "Archive Helper" and "1 von 2" in message and "1" in message.split("·")[1]
+
+
+def test_low_priority_is_a_saved_setting_and_part_of_the_run_settings(qapp, make_gui, tmp_path, fake_worker):
+    gui = started_gui(qapp, make_gui, tmp_path, fake_worker)
+    assert gui.cb_low_priority.isChecked()
+    gui.cb_low_priority.setChecked(False)
+    gui.start_archiving()
+    assert gui.worker.settings["low_priority"] is False
+    gui.stop_archiving()
+    wait_idle(qapp, gui)
+    gui.save_defaults()
+    assert make_gui().cb_low_priority.isChecked() is False
+
+
+def test_worker_pauses_and_resumes_its_processes(qapp, tmp_path):
+    import os
+    import signal
+
+    from archive_helper.compressor.workers import ArchiveWorker
+
+    if sys.platform == "win32":
+        pytest.skip("uses POSIX process states")
+    process = subprocess.Popen(["sleep", "30"], preexec_fn=os.setsid)
+
+    def state():
+        return subprocess.run(["ps", "-o", "stat=", "-p", str(process.pid)], capture_output=True, text=True).stdout.strip()
+
+    try:
+        worker = ArchiveWorker(tmp_path, tmp_path, 1, [], {})
+        worker.active_processes = [(process, Path("a.mp4"), Path("a_x.mp4"), 1, b"")]
+        worker.pause()
+        spin(100)
+        assert worker.paused and state().startswith("T")
+        worker.stop()   # stopping while paused wakes the processes up, so they can be killed
+        spin(100)
+        assert not worker.paused and not state().startswith("T")
+    finally:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        process.wait()
+
+
+# --- summary wording, path fields -------------------------------------------------------------------------------------
+
+def test_savings_are_written_as_smaller_or_larger_not_as_a_negative_percentage(qapp, make_gui):
+    from archive_helper.compressor.model import VideoRow
+
+    gui = make_gui()
+    root = Path("/src")
+    gui.model.reset([VideoRow(src=root / "a.mp4", dst=root / "a_x.mp4", size=1000, out_size=250, status="done", root=root)])
+    gui.refresh_summary()
+    text = gui.summary_values["saving"][1].text()
+    assert "75 % kleiner" in text and "-" not in text and "+" not in text
+
+    gui.model.reset([VideoRow(src=root / "a.mp4", dst=root / "a_x.mp4", size=1000, out_size=1500, status="done", root=root)])
+    gui.refresh_summary()
+    assert "50 % größer" in gui.summary_values["saving"][1].text()
+
+
+def test_long_paths_keep_their_start_and_last_folder_when_not_edited(qapp):
+    from archive_helper.compressor.widgets import DropLineEdit
+
+    field = DropLineEdit()
+    field.setFixedWidth(200)
+    path = "/Users/fheinrich/Movies/Neuer Iphone Videos Export/Compressed - Neuer Iphone Videos Export/"
+    field.setText(path)
+    field.show()
+    qapp.processEvents()
+    field.setFocus()
+    assert field.elided_text() is None   # while it is being edited the real text is shown
+    field.clearFocus()
+    shown = field.elided_text()
+    assert shown and shown.startswith("/Users") and shown.endswith("Export/") and "…" in shown
+    assert field.toolTip() == path and field.text() == path   # the real value is untouched
+
+    field.setText("/short")
+    assert field.elided_text() is None and field.toolTip() == "/short"
+    field.setText("")
+    assert field.elided_text() is None
+
+
+# --- target names, collisions, source = target -----------------------------------------------------------------------
+
+def scanned_rows(qapp, make_gui, tmp_path, names, postfix="_archived", flatten=False, dst=None):
+    src = tmp_path / "src"
+    make_named_videos(src, *names)
+    gui = make_gui()
+    gui.txt_postfix.setText(postfix)
+    gui.cb_flatten.setChecked(flatten)
+    scan(qapp, gui, str(src), str(dst or tmp_path / "dst"))
+    return gui, {str(row.src.relative_to(src)): row for row in gui.model.rows}
+
+
+def test_same_stem_different_extension_keeps_the_extension_in_both_names(qapp, make_gui, tmp_path):
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["test.mov", "test.mp4", "other.mov"])
+    assert rows["test.mov"].dst.name == "test.mov_archived.mp4"
+    assert rows["test.mp4"].dst.name == "test.mp4_archived.mp4"
+    assert rows["other.mov"].dst.name == "other_archived.mp4"         # no collision: the usual name
+    assert not any(row.duplicate or row.conflict for row in rows.values())
+    assert len({row.dst for row in rows.values()}) == 3
+
+
+def test_collisions_are_found_regardless_of_upper_and_lower_case(qapp, make_gui, tmp_path):
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["Test.MOV", "test.mp4"])
+    assert rows["Test.MOV"].dst.name == "Test.MOV_archived.mp4" and rows["test.mp4"].dst.name == "test.mp4_archived.mp4"
+    assert not any(row.duplicate for row in rows.values())
+
+
+def test_three_sources_with_one_stem_all_get_their_own_name(qapp, make_gui, tmp_path):
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["a.mov", "a.mp4", "a.mkv"])
+    assert sorted(row.dst.name for row in rows.values()) == ["a.mkv_archived.mp4", "a.mov_archived.mp4", "a.mp4_archived.mp4"]
+
+
+def test_collision_naming_also_works_for_an_empty_postfix_and_removes_the_conflict(qapp, make_gui, tmp_path):
+    src = tmp_path / "src"
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["test.mov", "test.mp4"], postfix="", dst=src)
+    assert {row.dst.name for row in rows.values()} == {"test.mov.mp4", "test.mp4.mp4"}
+    assert not any(row.conflict or row.duplicate for row in rows.values())
+
+
+def test_collisions_inside_one_flattened_folder_are_still_reported_as_duplicates(qapp, make_gui, tmp_path):
+    src = tmp_path / "src"
+    for folder in ("a", "b"):
+        (src / folder).mkdir(parents=True)
+        shutil.copy(EXAMPLE_VIDEOS[0], src / folder / "clip.mov")
+    gui = make_gui()
+    gui.cb_flatten.setChecked(True)
+    scan(qapp, gui, str(src), str(tmp_path / "dst"))
+    rows = {str(row.src.relative_to(src)): row for row in gui.model.rows}
+    assert all(row.duplicate for row in rows.values())               # identical names cannot be told apart by extension
+    assert {row.dst.name for row in rows.values()} == {"clip.mov_archived.mp4"}
+
+
+def test_a_result_with_an_extension_name_is_found_again_and_not_compressed_twice(qapp, make_gui, tmp_path):
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["test.mov", "test.mp4"])
+    for row in rows.values():
+        row.dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(row.src, row.dst)
+    scan(qapp, gui, str(tmp_path / "src"), str(tmp_path / "dst"))
+    assert {row.status for row in gui.model.rows} == {"exists"}
+
+
+def test_same_source_and_target_file_is_flagged_not_skipped_and_not_shown_as_archived(qapp, make_gui, tmp_path):
+    src = tmp_path / "src"
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["clip.mp4", "movie.mov"], postfix="", dst=src)
+    clip = rows["clip.mp4"]
+    assert clip.conflict and clip.status == "planned" and clip.out_size is None
+    from archive_helper.compressor.model import status_label
+    assert status_label(clip) == "⚠ Quelle = Ziel!"
+    assert [item["path"].name for item in gui.queue_items() if item["conflict"]] == ["clip.mp4"]
+    assert "Quelle = Ziel" in gui.progress_text.text()
+
+
+def test_a_target_that_is_another_source_video_counts_as_source_equals_target(qapp, make_gui, tmp_path):
+    # movie.mov would be written to movie.mp4, which is itself a video to compress (no collision: different stems)
+    src = tmp_path / "src"
+    make_named_videos(src, "movie.mov", "movie.mp4", "x.mov")
+    gui = make_gui()
+    gui.txt_postfix.setText("")
+    scan(qapp, gui, str(src), str(src))
+    names = {row.dst.name for row in gui.model.rows}
+    assert names == {"movie.mov.mp4", "movie.mp4.mp4", "x.mp4"}      # collision rule resolves it
+    assert not any(row.conflict for row in gui.model.rows)
+
+
+def test_starting_with_source_equals_target_needs_the_delayed_confirmation(qapp, make_gui, tmp_path, fake_worker, monkeypatch):
+    from archive_helper.compressor import gui as gui_module
+
+    src = tmp_path / "src"
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["clip.mp4"], postfix="", dst=src)
+    asked = []
+    monkeypatch.setattr(gui_module, "confirm_after_delay", lambda *args: asked.append(args) or False)
+    gui.start_archiving()
+    assert len(asked) == 1 and not gui.is_archiving()
+    assert "1 Videos" in asked[0][2] and "ERSETZT" in asked[0][2] and asked[0][3] == "Originale ersetzen"
+
+    monkeypatch.setattr(gui_module, "confirm_after_delay", lambda *args: asked.append(args) or True)
+    gui.start_archiving()
+    assert gui.is_archiving()
+    gui.stop_archiving()
+    wait_idle(qapp, gui)
+
+
+def test_no_confirmation_when_nothing_replaces_an_original(qapp, make_gui, tmp_path, fake_worker, monkeypatch):
+    from archive_helper.compressor import gui as gui_module
+
+    gui, rows = scanned_rows(qapp, make_gui, tmp_path, ["clip.mp4"])
+    monkeypatch.setattr(gui_module, "confirm_after_delay", lambda *args: pytest.fail("no warning expected"))
+    gui.start_archiving()
+    assert gui.is_archiving()
+    gui.stop_archiving()
+    wait_idle(qapp, gui)

@@ -13,7 +13,7 @@ from PySide6.QtGui import QImage
 
 from video_helper_core.i18n import tr
 from .utils import (
-    DEFAULT_POSTFIX, EXIFTOOL_CONFIG, DurationCache, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
+    DEFAULT_POSTFIX, EXIFTOOL_CONFIG, DurationCache, partial_path, path_key, same_file, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
     get_audio_streams, get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
 )
 
@@ -38,28 +38,40 @@ class UnifiedScanWorker(QThread):
             orig_files = [p for p in self.src_dir.rglob("*") if
                           p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
 
-            results = []
+            candidates = []
             for src_path in orig_files:
-                rel_path = src_path.relative_to(self.src_dir)
                 stem = src_path.stem
                 if stem.lower().endswith(self.excludes):
                     continue
+                candidates.append(src_path)
 
-                name = f"{stem}{self.postfix}.mp4"
-                predicted_dst = self.dst_dir / name if self.flatten else self.dst_dir / rel_path.with_name(name)
-                if predicted_dst == src_path:  # an empty postfix in the same folder would overwrite the original
-                    continue
-                
-                # Check if it already exists
-                comp_path = None
-                if predicted_dst.exists():
-                    comp_path = predicted_dst
-                
+            def target_for(src_path, name):
+                rel_path = src_path.relative_to(self.src_dir)
+                return self.dst_dir / name if self.flatten else self.dst_dir / rel_path.with_name(name)
+
+            # Two sources with the same target name (test.mov and test.mp4 both give test_archived.mp4) keep their
+            # extension in the name: test.mov_archived.mp4 and test.mp4_archived.mp4.
+            groups = {}
+            for src_path in candidates:
+                groups.setdefault(path_key(target_for(src_path, f"{src_path.stem}{self.postfix}.mp4")), []).append(src_path)
+            colliding = {src for group in groups.values() if len(group) > 1 for src in group}
+
+            source_keys = {path_key(p) for p in candidates}
+            results = []
+            for src_path in candidates:
+                name = f"{src_path.name}{self.postfix}.mp4" if src_path in colliding else f"{src_path.stem}{self.postfix}.mp4"
+                predicted_dst = target_for(src_path, name)
+                # The target is one of the videos being processed (typically an empty postfix next to an .mp4):
+                # it would replace the original. Shown in red and only done after an explicit confirmation.
+                conflict = path_key(predicted_dst) in source_keys or (predicted_dst.exists() and same_file(predicted_dst, src_path))
+                comp_path = predicted_dst if predicted_dst.exists() and not conflict else None
+
                 item = {
-                    'stem': stem,
+                    'stem': src_path.stem,
                     'path': src_path,
-                    'dst_path': predicted_dst if not comp_path else comp_path,
+                    'dst_path': predicted_dst,
                     'exists_compressed': comp_path is not None,
+                    'conflict': conflict,
                     'size': src_path.stat().st_size,
                     'comp_size': comp_path.stat().st_size if comp_path else 0,
                     'duration': None
@@ -97,6 +109,29 @@ class UnifiedScanWorker(QThread):
         self.scan_finished.emit(results)
 
 
+def suspend_process(process):
+    """Freezes a running ffmpeg (and its children) without losing its progress."""
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.ntdll.NtSuspendProcess(int(process._handle))
+    else:
+        os.killpg(os.getpgid(process.pid), signal.SIGSTOP)
+
+
+def resume_process(process):
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.ntdll.NtResumeProcess(int(process._handle))
+    else:
+        os.killpg(os.getpgid(process.pid), signal.SIGCONT)
+
+
+LOW_PRIORITY_NICE = 10
+BELOW_NORMAL_PRIORITY_CLASS = 0x00004000  # Windows
+
+
 class ArchiveWorker(QThread):
     progress_step = Signal(int, str)
 
@@ -121,6 +156,8 @@ class ArchiveWorker(QThread):
         self.queue = list(video_data_list)
         self.started = set()
         self.hdr_sources = set()
+        self.replacing = set()   # sources whose result replaces them (target = source, confirmed by the user)
+        self.paused = False
 
     def settings_record(self, src_path=None):
         """What gets stored in the result file (see utils.SETTINGS_TAG)."""
@@ -140,6 +177,23 @@ class ArchiveWorker(QThread):
         if src_path is not None and str(src_path) in self.hdr_sources:
             record["hdr"] = True
         return record
+
+    def pause(self):
+        """Freezes the running encodes and starts no new ones until resume()."""
+        self.paused = True
+        for process, *_ in list(self.active_processes):
+            try:
+                suspend_process(process)
+            except OSError:
+                pass
+
+    def resume(self):
+        for process, *_ in list(self.active_processes):
+            try:
+                resume_process(process)
+            except OSError:
+                pass
+        self.paused = False
 
     def set_queue(self, items):
         """Replace the videos still waiting; ones already started are never queued again."""
@@ -162,7 +216,7 @@ class ArchiveWorker(QThread):
         count = 0
 
         while (self.has_queue() or self.active_processes) and self.is_running:
-            while len(self.active_processes) < self.max_jobs and self.is_running:
+            while len(self.active_processes) < self.max_jobs and self.is_running and not self.paused:
                 file_info = self.next_item()
                 if file_info is None:
                     break
@@ -173,14 +227,16 @@ class ArchiveWorker(QThread):
                 if src_dur:
                     self.file_duration_discovered_path.emit(str(src_path), src_dur)
 
-                p_ffmpeg, skip_reason, log_msg, skip_data = self.start_video_process(src_path, dst_path, src_dur,
-                                                                                     src_fps, src_audio)
+                p_ffmpeg, skip_reason, log_msg, skip_data = self.start_video_process(
+                    src_path, dst_path, src_dur, src_fps, src_audio, replace_source=bool(file_info.get('conflict')))
 
                 if skip_reason:
                     count += 1
                     self.status_update_path.emit(str(src_path), "skipped", skip_reason, skip_data)
                     self.progress_step.emit(count, log_msg)
                 elif p_ffmpeg:
+                    if file_info.get('conflict'):
+                        self.replacing.add(str(src_path))
                     self.status_update_path.emit(str(src_path), "running", "", {})
                     self.active_processes.append((p_ffmpeg, src_path, dst_path, src_dur, b""))
             
@@ -221,7 +277,8 @@ class ArchiveWorker(QThread):
                 if poll is not None:
                     count += 1
                     self.ffmpeg_log_line_path.emit(str(src_path), tr("\n[INFO] Copying metadata & EXIF tags..."))
-                    success_msg, data_dict = self.finalize_video_process(p_ffmpeg, src_path, dst_path)
+                    success_msg, data_dict = self.finalize_video_process(
+                        p_ffmpeg, src_path, dst_path, replace_source=str(src_path) in self.replacing)
                     status_str = "finished" if "✅" in success_msg else "error"
                     reason_str = "" if status_str == "finished" else tr("FFmpeg error")
 
@@ -239,9 +296,10 @@ class ArchiveWorker(QThread):
             self.kill_all_processes()
         self.finished_all.emit()
     
-    def start_video_process(self, src_path, dst_path, src_dur, src_fps, src_audio):
+    def start_video_process(self, src_path, dst_path, src_dur, src_fps, src_audio, replace_source=False):
         try:
-            if dst_path.exists() and not self.settings['overwrite']:
+            # replace_source: the target is the source itself (confirmed by the user), so there is no earlier result to keep.
+            if dst_path.exists() and not self.settings['overwrite'] and not replace_source:
                 dst_dur, _, _ = get_video_info(dst_path)
                 if src_dur and dst_dur:
                     src_size = src_path.stat().st_size
@@ -258,6 +316,8 @@ class ArchiveWorker(QThread):
                         return None, tr("Duration differs"), f"⚠️ SKIP: {src_path.name}", {}
             
             dst_path.parent.mkdir(parents=True, exist_ok=True)
+            partial = partial_path(dst_path)
+            partial.unlink(missing_ok=True)   # left over from a crashed run
             
             filters = []
             if self.settings['limit_res']:
@@ -315,14 +375,24 @@ class ArchiveWorker(QThread):
                     "-tag:v", "hvc1"
                 ]
             
-            ffmpeg_cmd.append(str(dst_path))
+            # The result is written next to its final name and only renamed when complete: an aborted or failed run
+            # never destroys an existing file (and a replaced original stays intact until the new file is ready).
+            ffmpeg_cmd.append(str(partial))
             
             env = os.environ.copy()
             env["FFREPORT"] = f"file={os.devnull}:level=32"
             
+            low_priority = self.settings.get('low_priority', True)
+
+            def child_setup():
+                os.setsid()
+                if low_priority:
+                    os.nice(LOW_PRIORITY_NICE)  # keeps the computer usable while it encodes
+
             p_ffmpeg = subprocess.Popen(
                 ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0, env=env,
-                preexec_fn=os.setsid if sys.platform != "win32" else None
+                preexec_fn=child_setup if sys.platform != "win32" else None,
+                creationflags=BELOW_NORMAL_PRIORITY_CLASS if sys.platform == "win32" and low_priority else 0,
             )
             
             if sys.platform != "win32":
@@ -335,10 +405,11 @@ class ArchiveWorker(QThread):
         except Exception as e:
             return None, tr("Start error"), tr("❌ Could not start {name}: {error}", name=src_path.name, error=e), {}
     
-    def finalize_video_process(self, p_ffmpeg, src_path, dst_path):
+    def finalize_video_process(self, p_ffmpeg, src_path, dst_path, replace_source=False):
         data_dict = {}
+        partial = partial_path(dst_path)
         if p_ffmpeg.returncode != 0:
-            if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
+            partial.unlink(missing_ok=True)
             return tr("❌ Error in {name}: FFmpeg exit code {code}", name=src_path.name, code=p_ffmpeg.returncode), data_dict
 
         # Metadata copy is best-effort: a failure here (e.g. exotic tags, missing
@@ -350,19 +421,30 @@ class ArchiveWorker(QThread):
                 ["exiftool", "-config", str(EXIFTOOL_CONFIG),
                  "-tagsFromFile", str(src_path), "-all:all", "-gps*", "-Keys:all", "-UserData:all",
                  settings_tag_argument(self.settings_record(src_path)),
-                 str(dst_path), "-overwrite_original", "-q"], check=True)
+                 str(partial), "-overwrite_original", "-q"], check=True)
         except Exception as e:
             metadata_warning = tr(" ⚠️ (metadata could not be copied: {error})", error=e)
         try:
-            copy_file_times(src_path, dst_path)
+            copy_file_times(src_path, partial)
         except OSError as e:
             metadata_warning += tr(" ⚠️ (metadata could not be copied: {error})", error=e)
 
         try:
             src_size = src_path.stat().st_size
-            dst_size = dst_path.stat().st_size
+            dst_size = partial.stat().st_size
         except OSError as e:
-            if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
+            partial.unlink(missing_ok=True)
+            return tr("❌ Post-processing failed for {name}: {error}", name=src_path.name, error=e), data_dict
+
+        if replace_source and dst_size >= src_size:
+            # Replacing the original by something bigger would only do harm.
+            partial.unlink(missing_ok=True)
+            data_dict = {'src_size': src_size, 'dst_size': src_size, 'diff_size': 0, 'ratio': 100.0, 'settings': None}
+            return tr("✅ KEPT ORIGINAL: {name} | the compressed file was not smaller", name=src_path.name), data_dict
+        try:
+            os.replace(partial, dst_path)   # atomic: the final name never holds a half-written file
+        except OSError as e:
+            partial.unlink(missing_ok=True)
             return tr("❌ Post-processing failed for {name}: {error}", name=src_path.name, error=e), data_dict
 
         diff_size = src_size - dst_size
@@ -387,7 +469,9 @@ class ArchiveWorker(QThread):
     
     def stop(self):
         self.is_running = False
-    
+        if self.paused:
+            self.resume()
+
     def kill_all_processes(self):
         for p_ffmpeg, src_path, dst_path, _, _ in self.active_processes:
             if p_ffmpeg.poll() is None:
@@ -398,7 +482,7 @@ class ArchiveWorker(QThread):
                         p_ffmpeg.kill()
                 except:
                     pass
-            if dst_path and dst_path.exists(): dst_path.unlink(missing_ok=True)
+            partial_path(dst_path).unlink(missing_ok=True)   # only the unfinished file; an existing result stays
 
 
 class CompareScanWorker(QThread):

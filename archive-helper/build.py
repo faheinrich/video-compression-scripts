@@ -21,7 +21,7 @@ def main():
         "--exclude-module", "PyQt5",
         "main.py",
     ]
-    subprocess.check_call(["uv", "sync", "--package", APP, "--group", "dev"], cwd=HERE.parent)
+    subprocess.check_call(["uv", "sync", "--inexact", "--package", APP, "--group", "dev"], cwd=HERE.parent)
     subprocess.check_call(["uv", "run", "--package", APP, *cmd], cwd=HERE)
     print("Build complete. Check the 'dist' directory.")
 
