@@ -174,19 +174,37 @@ class ArchiverGUI(QWidget):
         self.check_system_dependencies()
 
     # ------------------------------------------------------------------ layout
-    FIXED_COLUMNS = {COL_DURATION: 80, COL_SIZE: 100, COL_RESULT: 150, COL_STATUS: 200}
-    SETTINGS_COLUMN_WIDTH, MIN_SETTINGS_COLUMN_WIDTH, MIN_FILE_COLUMN_WIDTH = 320, 100, 200
+    FIXED_COLUMNS = {COL_DURATION: 80, COL_SIZE: 100, COL_RESULT: 150, COL_STATUS: 160}
+    SETTINGS_COLUMN_WIDTH, MIN_SETTINGS_COLUMN_WIDTH, MIN_FILE_COLUMN_WIDTH, SMALLEST_FILE_COLUMN_WIDTH = 320, 100, 200, 120
 
     def fit_columns(self):
-        """The file name gets its room first; the settings column takes what is left and disappears when
-        that is too little. It comes back when the window gets wider or the settings drawer is closed."""
+        """Columns can be dragged. Until the user drags one, the file name gets the room that is left; the
+        settings column takes what remains of that and disappears when it is too little (it comes back when the
+        window gets wider or the settings drawer is closed)."""
         header = self.table.horizontalHeader()
-        spare = self.table.viewport().width() - sum(self.FIXED_COLUMNS.values()) - self.MIN_FILE_COLUMN_WIDTH
-        if spare < self.MIN_SETTINGS_COLUMN_WIDTH:
-            header.hideSection(COL_SETTINGS)
-        else:
-            header.showSection(COL_SETTINGS)
-            header.resizeSection(COL_SETTINGS, min(self.SETTINGS_COLUMN_WIDTH, spare))
+        self.fitting_columns = True
+        try:
+            # The last column stretches to the edge, so its own width says nothing about what it needs.
+            others = sum(header.sectionSize(c) if c in self.dragged_columns or c != COL_STATUS else self.FIXED_COLUMNS[c]
+                         for c in self.FIXED_COLUMNS)
+            width = self.table.viewport().width()
+            spare = width - others - self.MIN_FILE_COLUMN_WIDTH
+            if COL_SETTINGS in self.dragged_columns:
+                header.showSection(COL_SETTINGS)
+            elif spare < self.MIN_SETTINGS_COLUMN_WIDTH:
+                header.hideSection(COL_SETTINGS)
+            else:
+                header.showSection(COL_SETTINGS)
+                header.resizeSection(COL_SETTINGS, min(self.SETTINGS_COLUMN_WIDTH, spare))
+            if COL_FILE not in self.dragged_columns:
+                settings = 0 if header.isSectionHidden(COL_SETTINGS) else header.sectionSize(COL_SETTINGS)
+                header.resizeSection(COL_FILE, max(self.SMALLEST_FILE_COLUMN_WIDTH, width - others - settings))
+        finally:
+            self.fitting_columns = False
+
+    def remember_dragged_column(self, column, old_size, new_size):
+        if not self.fitting_columns and not self.table.horizontalHeader().isSectionHidden(column):
+            self.dragged_columns.add(column)
 
     def init_ui(self):
         root = QHBoxLayout(self)
@@ -331,14 +349,23 @@ class ArchiverGUI(QWidget):
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(False)
-        self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(46)
+        # The vertical header numbers the rows as shown, i.e. in processing order, whatever the sort.
+        vheader = self.table.verticalHeader()
+        vheader.setDefaultSectionSize(46)
+        vheader.setSectionResizeMode(QHeaderView.Fixed)
+        vheader.setMinimumWidth(36)
+        vheader.setDefaultAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        vheader.setHighlightSections(False)
+        vheader.setStyleSheet("QHeaderView { background: transparent; } QHeaderView::section { background: transparent; border: none; color: #8a8f98; padding-right: 8px; }")
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(COL_FILE, QHeaderView.Stretch)
+        header.setSectionResizeMode(COL_FILE, QHeaderView.Interactive)
+        header.setStretchLastSection(True)
+        self.dragged_columns, self.fitting_columns = set(), False
         for col, width in self.FIXED_COLUMNS.items():
             header.setSectionResizeMode(col, QHeaderView.Interactive)
             header.resizeSection(col, width)
         header.setSectionResizeMode(COL_SETTINGS, QHeaderView.Interactive)
+        header.sectionResized.connect(self.remember_dragged_column)
         self.column_watcher = ResizeWatcher(self.table.viewport(), self.fit_columns)
         header.setHighlightSections(False)
         self.table.setItemDelegateForColumn(COL_FILE, FileDelegate(self.model, self.table))

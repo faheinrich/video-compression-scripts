@@ -1,3 +1,4 @@
+import pytest
 from PySide6.QtCore import QPointF, QRectF, Qt, QUrl
 
 from conftest import EXAMPLE_VIDEOS, requires_ffmpeg, spin
@@ -248,3 +249,32 @@ def test_back_lives_in_the_title_bar_and_tools_start_below_it(qapp):
     qapp.processEvents()
     assert not window.toolbar.back.isVisible()
     window.close()
+
+
+def test_path_field_accepts_dropped_folder(qapp, tmp_path):
+    from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
+    from PySide6.QtGui import QDropEvent
+
+    from video_helper_tools.compressor.widgets import DropLineEdit
+
+    field = DropLineEdit()
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(tmp_path))])
+    field.dropEvent(QDropEvent(QPointF(1, 1), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier))
+    assert field.text() == str(tmp_path)
+
+
+def test_video_view_zooms_with_the_wheel(qapp):
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+
+    from video_helper_tools.compressor.widgets import ZoomableVideoView
+
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    view = ZoomableVideoView(QMediaPlayer())
+    seen = []
+    view.zoom_changed.connect(seen.append)
+    for delta in (120, -120):
+        view.wheelEvent(QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(), QPoint(0, delta), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+    assert len(seen) == 2 and seen[0] > 1 and seen[1] == pytest.approx(1.0)

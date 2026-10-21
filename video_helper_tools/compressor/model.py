@@ -240,6 +240,12 @@ class VideoFilterProxy(QSortFilterProxyModel):
         self.text_filter = text.lower().strip()
         self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
 
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        # Row numbers count the rows as shown, which is also the order they are processed in.
+        if orientation == Qt.Vertical:
+            return section + 1 if role == Qt.DisplayRole else None
+        return super().headerData(section, orientation, role)
+
     def lessThan(self, left, right):
         # Compare in Python: Qt's default compares by the *left* value's type, so a file
         # under 2 GB (int) against a larger one (qlonglong) truncated the larger size.

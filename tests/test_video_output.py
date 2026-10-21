@@ -213,6 +213,27 @@ def test_portrait_phone_clips_come_out_upright(qapp, tmp_path):
     assert get_display_rotation(out) == 0
 
 
+def test_video_is_kept_with_a_warning_when_exiftool_fails(qapp, tmp_path, monkeypatch):
+    from video_helper_tools.compressor import workers
+    from video_helper_tools.core import i18n
+
+    i18n.set_language("en")
+    real_run = subprocess.run
+
+    def run(cmd, *args, **kwargs):
+        if cmd[0] == "exiftool":
+            raise FileNotFoundError("exiftool")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(workers.subprocess, "run", run)
+    src = tmp_path / "src"
+    src.mkdir()
+    make_clip(src / "a.mp4", size="320x180", seconds=1)
+    out, message, data = compress(qapp, src, "a.mp4")
+    assert out.exists() and "metadata could not be copied" in message
+    assert data["settings"] is None
+
+
 def test_failed_encode_leaves_no_result_file(qapp, tmp_path):
     src = tmp_path / "src"
     src.mkdir()

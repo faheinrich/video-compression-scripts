@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -719,3 +720,94 @@ def test_file_names_stay_visible_with_the_settings_drawer_open(make_gui, qapp, w
     qapp.processEvents()
     assert gui.drawer.isVisible()
     assert gui.table.horizontalHeader().sectionSize(COL_FILE) >= 180
+
+
+def test_rows_are_numbered_in_the_order_they_are_shown(qapp, make_gui):
+    from PySide6.QtCore import Qt
+
+    from video_helper_tools.compressor.model import COL_FILE, COL_SIZE, VideoRow
+
+    gui = make_gui()
+    root = Path("/src")
+    gui.model.reset([VideoRow(src=root / f"{n}.mp4", dst=root / f"{n}_a.mp4", size=size, root=root)
+                        for n, size in (("a", 10), ("b", 30), ("c", 20))])
+    gui.table.sortByColumn(COL_SIZE, Qt.DescendingOrder)
+    assert not gui.table.verticalHeader().isHidden()
+    names = [gui.proxy.index(r, COL_FILE).data() for r in range(3)]
+    numbers = [gui.proxy.headerData(r, Qt.Vertical, Qt.DisplayRole) for r in range(3)]
+    assert names == ["b.mp4", "c.mp4", "a.mp4"] and numbers == [1, 2, 3]
+
+
+def test_csv_export_lists_every_row(qapp, make_gui, tmp_path, monkeypatch):
+    import csv
+
+    from PySide6.QtWidgets import QFileDialog
+
+    from video_helper_tools.compressor.model import VideoRow
+
+    gui = make_gui()
+    root = Path("/src")
+    gui.model.reset([VideoRow(src=root / "a.mp4", dst=root / "a_x.mp4", size=1000, out_size=250, duration=61, status="done", root=root),
+                     VideoRow(src=root / "b.mp4", dst=root / "b_x.mp4", size=500, root=root)])
+    target = tmp_path / "log.csv"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(target), "")))
+    gui.export_logs()
+    rows = list(csv.DictReader(target.open(encoding="utf-8")))
+    assert [r["file"] for r in rows] == ["a.mp4", "b.mp4"]
+    assert rows[0]["saved_bytes"] == "750" and rows[0]["ratio"] == "0.250"
+    assert rows[1]["result_bytes"] == "" and rows[1]["ratio"] == ""
+
+
+def test_csv_export_reports_unwritable_target(qapp, make_gui, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    gui = make_gui()
+    shown = []
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "no" / "dir.csv"), "")))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: shown.append(a[2])))
+    gui.export_logs()
+    assert shown and str(tmp_path) in shown[0]
+
+
+def test_columns_can_be_dragged_and_stay_put_when_the_window_resizes(qapp, make_gui):
+    from video_helper_tools.compressor.model import COL_FILE, COL_RESULT, COL_STATUS
+
+    gui = make_gui()
+    gui.resize(1300, 600)
+    gui.show()
+    qapp.processEvents()
+    header = gui.table.horizontalHeader()
+    stretched = header.sectionSize(COL_FILE)
+    assert stretched >= gui.MIN_FILE_COLUMN_WIDTH
+    header.resizeSection(COL_RESULT, 260)
+    gui.fit_columns()
+    assert header.sectionSize(COL_RESULT) == 260
+    header.resizeSection(COL_FILE, 333)
+    gui.resize(1500, 600)
+    qapp.processEvents()
+    assert header.sectionSize(COL_FILE) == 333 and header.sectionSize(COL_RESULT) == 260
+    assert header.sectionResizeMode(COL_FILE) != header.ResizeMode.Stretch
+
+
+@pytest.mark.parametrize("width", [900, 1280, 1800])
+def test_columns_reach_the_right_edge(make_gui, qapp, width):
+    gui = make_gui()
+    gui.resize(width, 600)
+    gui.show()
+    qapp.processEvents()
+    header = gui.table.horizontalHeader()
+    assert header.length() >= gui.table.viewport().width()
+
+
+def test_dragging_a_column_narrower_leaves_no_gap_at_the_right(make_gui, qapp):
+    from video_helper_tools.compressor.model import COL_FILE
+
+    gui = make_gui()
+    gui.resize(1500, 600)
+    gui.show()
+    qapp.processEvents()
+    gui.table.horizontalHeader().resizeSection(COL_FILE, 250)
+    qapp.processEvents()
+    header = gui.table.horizontalHeader()
+    assert header.length() >= gui.table.viewport().width()
+    assert header.sectionSize(5) > 160   # the status column took the freed room
