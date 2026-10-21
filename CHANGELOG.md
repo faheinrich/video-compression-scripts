@@ -6,6 +6,10 @@ All notable changes to the two apps and the shared core. The format follows
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-10-21
+
+Archive Helper `archive-v0.0.3`. Analysis Helper has no changes of its own and stays at 0.0.2.
+
 ### Archive Helper
 - New: **Inspect different compressions.** A button next to "Process next" (and an entry in the row menu) opens the
   compression lab for the selected video. Several variants (three at first, starting with Small, Archive and High quality
@@ -22,6 +26,11 @@ All notable changes to the two apps and the shared core. The format follows
 - New sample for tests and for trying it out: `archive-helper/example_resources/hdr-gradient-hlg.mov` (HLG, BT.2020,
   10 bit, moving colour gradients and grey ramps where banding shows first; `tests/hdr_samples.py` builds it).
 - Internal: the ffmpeg call is built by `ArchiveWorker.build_ffmpeg_command`, used by the real run and the lab alike.
+- New: **Estimated time** in the summary: how long the queue will take, from the encodes of earlier runs and of the
+  compression lab with the same encoder, preset, resolution and frame-rate limit (a cautious guess if only another number
+  of parallel videos was measured). Videos whose length is not known yet count like the average.
+- Fixed: in the compare viewer the Rotate button is a small ⟳ in the title row; a turned landscape clip is fitted as the
+  portrait picture it now is, and "Reset view" keeps the rotation.
 
 ## [0.0.2] - 2026-10-21
 
@@ -63,12 +72,6 @@ Archive Helper `archive-v0.0.2`, Analysis Helper `analysis-v0.0.2`.
   clicks on it. The native title is left empty there.
 - Fixed: the quality hint under the Small / Archive / High buttons changed its length and moved the controls below it
   while the CRF slider was dragged. The hint now has a fixed height.
-
-- New: **Estimated time** in the summary: how long the queue will take, from the encodes of earlier runs and of the
-  compression lab with the same encoder, preset, resolution and frame-rate limit (a cautious guess if only another number
-  of parallel videos was measured). Videos whose length is not known yet count like the average.
-- Fixed: in the compare viewer the Rotate button is a small ⟳ in the title row; a turned landscape clip is fitted as the
-  portrait picture it now is, and "Reset view" keeps the rotation.
 
 ### Analysis Helper
 - Fixed: the same title bar problem as in Archive Helper (shared window shell).
@@ -114,7 +117,8 @@ settings of the former app are copied once on first start.
 - GitHub workflow builds macOS, Linux and Windows packages per app when its tag is pushed; the tag must match the
   version in the app's `pyproject.toml`.
 
-[Unreleased]: https://github.com/faheinrich/video-helper-tools/compare/archive-v0.0.2...HEAD
+[Unreleased]: https://github.com/faheinrich/video-helper-tools/compare/archive-v0.0.3...HEAD
+[0.0.3]: https://github.com/faheinrich/video-helper-tools/compare/archive-v0.0.2...archive-v0.0.3
 [0.0.2]: https://github.com/faheinrich/video-helper-tools/compare/archive-v0.0.1...archive-v0.0.2
 [archive-v0.0.1]: https://github.com/faheinrich/video-helper-tools/releases/tag/archive-v0.0.1
 [analysis-v0.0.1]: https://github.com/faheinrich/video-helper-tools/releases/tag/analysis-v0.0.1
