@@ -636,6 +636,33 @@ def test_original_can_be_played_without_a_result(make_gui, tmp_path):
     assert texts["Original abspielen"] and "Vergleichen" not in texts
 
 
+def spin_until(condition, timeout_s=20):
+    deadline = time.monotonic() + timeout_s
+    while not condition() and time.monotonic() < deadline:
+        spin(50)
+
+
+def test_start_button_follows_the_scan_and_says_why_it_is_disabled(make_gui, tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    gui = make_gui()
+    gui.txt_src.setText(str(src))
+    gui.txt_dst.setText(str(dst))
+    spin_until(lambda: gui.scan_worker is not None and not gui.is_scanning())
+    spin(100)
+    assert not gui.btn_run.isEnabled()
+    assert gui.btn_run.toolTip()  # says why: no videos
+
+    shutil.copy(EXAMPLE_VIDEOS[0], src / "a.mp4")
+    gui.start_unified_scan()
+    spin_until(lambda: not gui.is_scanning() and len(gui.scan_items) == 1)
+    spin(100)
+    # Regression: the result arrived while the scan thread was still ending, and the button stayed grey.
+    assert gui.btn_run.isEnabled()
+    assert gui.btn_run.toolTip() == ""
+
+
 def make_hlg_clip(path):
     """Like iPhone HDR: HEVC Main 10, BT.2020, HLG."""
     subprocess.run(

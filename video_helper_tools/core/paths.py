@@ -41,3 +41,9 @@ def thumbnail_dir():
     path = _base_dir("cache") / "thumbnails"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def duration_cache_file():
+    path = _base_dir("cache") / "durations.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path

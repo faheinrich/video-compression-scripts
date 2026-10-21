@@ -284,6 +284,48 @@ def test_duration_probe_worker_reports_durations(qapp, tmp_path):
     assert [s[0] for s in seen] == [str(clip)] and seen[0][1] == pytest.approx(2, abs=0.2)
 
 
+def test_duration_probe_worker_probes_in_parallel_and_remembers_durations(qapp, tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from video_helper_tools.compressor import workers
+
+    files = [touch(tmp_path / f"v{i}.mp4", 10 + i) for i in range(12)]
+    calls, active, peak = [], [0], [0]
+    lock = threading.Lock()
+
+    def slow_info(path):  # like a disk that takes its time
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.05)
+        with lock:
+            active[0] -= 1
+            calls.append(path)
+        return 42.0, 25.0, "aac"
+
+    monkeypatch.setattr(workers, "get_video_info", slow_info)
+    worker = workers.DurationProbeWorker(files)
+    seen = collect(worker.duration_found)
+    worker.run()
+    assert sorted(s[0] for s in seen) == sorted(str(f) for f in files) and peak[0] > 1
+
+    # A second run is answered from the cache without opening any file.
+    calls.clear()
+    again = workers.DurationProbeWorker(files)
+    seen_again = collect(again.duration_found)
+    again.run()
+    assert calls == [] and len(seen_again) == len(files)
+
+    # A changed file is probed again.
+    files[0].write_bytes(b"changed and longer")
+    calls.clear()
+    third = workers.DurationProbeWorker(files)
+    collect(third.duration_found)
+    third.run()
+    assert calls == [files[0]]
+
+
 def test_duration_probe_worker_can_be_stopped(qapp, tmp_path):
     from video_helper_tools.compressor.workers import DurationProbeWorker
 

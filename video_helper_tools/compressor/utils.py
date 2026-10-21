@@ -311,3 +311,49 @@ def copy_file_times(src_path, dst_path):
         # macOS moves a file's creation time back whenever the modification time is set to an earlier moment.
         os.utime(dst_path, (stat.st_atime, birth))
     os.utime(dst_path, (stat.st_atime, stat.st_mtime))
+
+
+class DurationCache:
+    """Remembers video durations between runs, keyed by file size and modification time, so a rescan of
+    hundreds of videos on a slow disk does not have to open every file again."""
+
+    def __init__(self, path=None):
+        from video_helper_tools.core.paths import duration_cache_file
+        self.path = Path(path) if path else duration_cache_file()
+        try:
+            self.entries = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.entries = {}
+        self.unsaved = 0
+
+    @staticmethod
+    def signature(file_path):
+        stat = Path(file_path).stat()
+        return [stat.st_size, stat.st_mtime_ns]
+
+    def get(self, file_path):
+        entry = self.entries.get(str(file_path))
+        try:
+            if entry and entry[:2] == self.signature(file_path):
+                return entry[2]
+        except OSError:
+            pass
+        return None
+
+    def put(self, file_path, duration):
+        try:
+            self.entries[str(file_path)] = [*self.signature(file_path), duration]
+            self.unsaved += 1
+        except OSError:
+            pass
+
+    def save(self):
+        if not self.unsaved:
+            return
+        try:
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.entries), encoding="utf-8")
+            os.replace(tmp, self.path)
+            self.unsaved = 0
+        except OSError:
+            pass

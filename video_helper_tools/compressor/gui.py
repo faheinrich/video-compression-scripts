@@ -632,11 +632,24 @@ class ArchiverGUI(QWidget):
         self.btn_run.style().polish(self.btn_run)
         self.update_run_enabled()
 
-    def update_run_enabled(self):
+    def run_blocked_reason(self):
+        """Why the start button is disabled, or "" when it is not."""
         if self.is_archiving():
-            self.btn_run.setEnabled(True)
-        else:
-            self.btn_run.setEnabled(bool(self.queue_items()) and not self.is_scanning())
+            return ""
+        if self.is_scanning():
+            return tr("The folders are still being scanned.")
+        if not self.txt_src.text().strip() or not self.txt_dst.text().strip():
+            return tr("Choose a source and a target folder first.")
+        if not self.queue_items():
+            if self.scan_items:
+                return tr("Nothing to do: all videos already have a result. Turn on “Overwrite existing results” to compress them again.")
+            return tr("No videos found in the source folder.")
+        return ""
+
+    def update_run_enabled(self):
+        reason = self.run_blocked_reason()
+        self.btn_run.setEnabled(not reason)
+        self.btn_run.setToolTip(reason)
         for widget in (self.spin_jobs, self.txt_src, self.txt_dst, self.cb_flatten, self.txt_postfix, self.txt_excludes):
             widget.setEnabled(not self.is_archiving())
 
@@ -682,6 +695,8 @@ class ArchiverGUI(QWidget):
             self.src_dir(), self.dst_dir(), self.cb_flatten.isChecked(),
             postfix=self.postfix(), excludes=parse_excludes(self.txt_excludes.text()))
         self.scan_worker.scan_finished.connect(self.on_unified_scan_finished)
+        # The result arrives while the thread is still ending, so is_scanning() is still true in that handler.
+        self.scan_worker.finished.connect(self.update_run_enabled)
         self.scan_worker.start()
         self.update_run_enabled()
         self.refresh_summary()
@@ -907,6 +922,7 @@ class ArchiverGUI(QWidget):
                              tooltip=tr("Probably not enough space: about {needed} needed.", needed=format_size(needed)) if low else "")
 
         self.progress_text.setText(self.progress_message(rows, counts))
+        self.update_run_enabled()
 
     def set_summary(self, key, text, tone=None, tooltip=""):
         _, label = self.summary_values[key]

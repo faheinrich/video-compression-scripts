@@ -321,6 +321,10 @@ GERMAN = {
         'Selbst ausführen: python -m video_helper_tools.sync.benchmark',
     'Play original': 'Original abspielen',
     'Original: {name}': 'Original: {name}',
+    'The folders are still being scanned.': 'Die Ordner werden noch durchsucht.',
+    'Choose a source and a target folder first.': 'Wähle zuerst einen Quell- und einen Zielordner.',
+    'Nothing to do: all videos already have a result. Turn on “Overwrite existing results” to compress them again.':
+        'Nichts zu tun: Alle Videos haben schon ein Ergebnis. Aktiviere „Vorhandene Ergebnisse überschreiben“, um sie erneut zu komprimieren.',
     'Start sync': 'Sync starten',
     'Stop sync': 'Sync stoppen',
     'Select source folder': 'Quellordner auswählen',

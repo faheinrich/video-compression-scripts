@@ -6,13 +6,14 @@ import signal
 import sys
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal, QRunnable, QObject
 from PySide6.QtGui import QImage
 
 from video_helper_tools.core.i18n import tr
 from .utils import (
-    DEFAULT_POSTFIX, EXIFTOOL_CONFIG, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
+    DEFAULT_POSTFIX, EXIFTOOL_CONFIG, DurationCache, copy_file_times, format_size, generate_thumbnail, get_thumbnail_path, get_video_info, is_photos_compatible,
     get_audio_streams, get_hdr_color, parse_ffmpeg_time, read_compression_settings, settings_tag_argument,
 )
 
@@ -558,13 +559,39 @@ class DurationProbeWorker(QThread):
     def stop(self):
         self._stopped = True
 
+    PARALLEL_PROBES = 6  # ffprobe mostly waits for the disk; a few at once hide that latency
+
     def run(self):
+        cache = DurationCache()
+        missing = []
         for path in self.paths:
             if self._stopped:
                 return
-            duration, _, _ = get_video_info(path)
+            duration = cache.get(path)
             if duration:
                 self.duration_found.emit(str(path), duration)
+            else:
+                missing.append(path)
+
+        def probe(path):
+            return path, (None if self._stopped else get_video_info(path)[0])
+
+        with ThreadPoolExecutor(self.PARALLEL_PROBES) as pool:
+            futures = [pool.submit(probe, path) for path in missing]
+            try:
+                for count, future in enumerate(as_completed(futures), 1):
+                    if self._stopped:
+                        break
+                    path, duration = future.result()
+                    if duration:
+                        cache.put(path, duration)
+                        self.duration_found.emit(str(path), duration)
+                    if count % 25 == 0:
+                        cache.save()
+            finally:
+                for future in futures:
+                    future.cancel()
+        cache.save()
 
 
 class ResultSettingsWorker(QThread):
