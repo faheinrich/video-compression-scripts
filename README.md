@@ -40,8 +40,8 @@ FFmpeg and ExifTool are needed for most tests (they are skipped when missing).
 A tag builds one app for macOS, Linux and Windows and publishes it as a GitHub release:
 
 ```bash
-git tag archive-v0.0.1 && git push origin archive-v0.0.1
-git tag analysis-v0.0.1 && git push origin analysis-v0.0.1
+git tag archive-v0.0.2 && git push origin archive-v0.0.2
+git tag analysis-v0.0.2 && git push origin analysis-v0.0.2
 ```
 
 The version in the tag must match the app's `pyproject.toml` (and `__version__`); the workflow checks that.

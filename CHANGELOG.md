@@ -6,6 +6,14 @@ All notable changes to the two apps and the shared core. The format follows
 
 ## [Unreleased]
 
+### Archive Helper
+- Planned for 0.0.3: "Inspect different compressions" (several compression settings of one video side by side, with
+  file sizes and 100 % / 200 % zoom; see `archive-helper/docs/PLAN_DRAG_DROP_UND_TEST_COMPRESSION.md`).
+
+## [0.0.2] - 2026-10-21
+
+Archive Helper `archive-v0.0.2`, Analysis Helper `analysis-v0.0.2`.
+
 ### Both apps
 - The overview page shows the version at the bottom left. At start the app asks GitHub once (in the background, no
   other data is sent) whether a newer release of the app exists and then shows "New version vX.Y.Z available" in
@@ -30,12 +38,14 @@ All notable changes to the two apps and the shared core. The format follows
 - Changed: when two sources would get the same target name (`test.mov` and `test.mp4`), both keep their extension in
   the name (`test.mov_archived.mp4`, `test.mp4_archived.mp4`).
 - "Keep computer awake" is off by default.
-- New: **drag and drop.** Dragging files over the window shows two big areas, Source and Target. A folder on Source sets the
-  source folder; video files (or several folders) on Source become a hand-picked list ("Back to folder mode" returns); a
-  folder on Target sets the target. Over the list, the whole list is the Source area. Hand-picked videos get their
-  results next to the originals unless a target folder is set, with the same name rules and the same source = target
-  warning. Nothing can be dropped while a run is going.
-- Planned: "Inspect different compressions" (see `docs/PLAN_DRAG_DROP_UND_TEST_COMPRESSION.md`).
+- New: **drag and drop.** Dragging files over the window shows two big areas that do not overlap: Source (the list and
+  everything left of the settings) and Target (the settings column), each saying what a drop would do. A folder on
+  Source sets the source folder; video files, a single file or several folders on Source become a hand-picked list
+  ("Back to folder mode" returns); a folder (or the folder of a file) on Target sets the target. For hand-picked videos
+  the target is emptied: every result goes next to its original unless you choose one folder. Same name rules and the
+  same source = target warning as in folder mode. Nothing can be dropped while a run is going.
+- New: the target folder is checked before the start ("Is the drive connected?"), and a video that cannot be started
+  is shown as a red error with the reason instead of "Skipped".
 - Fixed: on macOS the native window title was drawn over the back button in the title bar and probably swallowed
   clicks on it. The native title is left empty there.
 - Fixed: the quality hint under the Small / Archive / High buttons changed its length and moved the controls below it
@@ -85,6 +95,7 @@ settings of the former app are copied once on first start.
 - GitHub workflow builds macOS, Linux and Windows packages per app when its tag is pushed; the tag must match the
   version in the app's `pyproject.toml`.
 
-[Unreleased]: https://github.com/faheinrich/video-helper-tools/compare/archive-v0.0.1...HEAD
+[Unreleased]: https://github.com/faheinrich/video-helper-tools/compare/archive-v0.0.2...HEAD
+[0.0.2]: https://github.com/faheinrich/video-helper-tools/compare/archive-v0.0.1...archive-v0.0.2
 [archive-v0.0.1]: https://github.com/faheinrich/video-helper-tools/releases/tag/archive-v0.0.1
 [analysis-v0.0.1]: https://github.com/faheinrich/video-helper-tools/releases/tag/analysis-v0.0.1
