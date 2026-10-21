@@ -58,3 +58,9 @@ def duration_cache_file():
     path = _base_dir("cache") / "durations.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def speed_cache_file():
+    path = _base_dir("cache") / "encode_speed.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path

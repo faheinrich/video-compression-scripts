@@ -25,6 +25,10 @@ def make_clip(path, seconds=4, size="640x360"):
     return path
 
 
+def uids(dialog):
+    return [c.uid for c in dialog.columns]
+
+
 def wait_for_thread(qapp, worker, timeout=120):
     import time
 
@@ -100,7 +104,7 @@ def test_lab_worker_encodes_every_variant_for_the_part_only(qapp, tmp_path):
 
     clip = make_clip(tmp_path / "a.mp4", seconds=6)
     done, started = [], []
-    worker = LabWorker(clip, (1, 2), variant_defaults(BASE), tmp_path / "lab", 25)
+    worker = LabWorker(clip, (1, 2), list(enumerate(variant_defaults(BASE))), tmp_path / "lab", 25)
     worker.variant_started.connect(started.append)
     worker.variant_done.connect(lambda i, path, size, seconds: done.append((i, Path(path), size, seconds)))
     (tmp_path / "lab").mkdir()
@@ -121,7 +125,7 @@ def test_lab_worker_reports_a_variant_that_fails(qapp, tmp_path):
     broken.write_bytes(b"not a video")
     (tmp_path / "lab").mkdir()
     failed = []
-    worker = LabWorker(broken, (0, 2), variant_defaults(BASE)[:1], tmp_path / "lab", 25)
+    worker = LabWorker(broken, (0, 2), list(enumerate(variant_defaults(BASE)[:1])), tmp_path / "lab", 25)
     worker.variant_failed.connect(lambda i, message: failed.append((i, message)))
     worker.run()
     assert len(failed) == 1 and failed[0][0] == 0 and failed[0][1]
@@ -134,7 +138,7 @@ def test_lab_worker_can_be_stopped(qapp, tmp_path):
     clip = make_clip(tmp_path / "a.mp4", seconds=20, size="1280x720")
     (tmp_path / "lab").mkdir()
     slow = [{**v, 'preset': 'veryslow'} for v in variant_defaults(BASE)]
-    worker = LabWorker(clip, (0, 20), slow, tmp_path / "lab", 25)
+    worker = LabWorker(clip, (0, 20), list(enumerate(slow)), tmp_path / "lab", 25)
     done = []
     worker.variant_done.connect(lambda *args: done.append(args))
     worker.start()
@@ -189,11 +193,11 @@ def test_encoding_fills_in_sizes_estimates_and_frames(qapp, lab):
     wait_for_thread(qapp, lab.frame_worker)
     spin(200)
     assert lab.btn_encode.isEnabled() and not lab.btn_cancel.isEnabled()
-    assert set(lab.results) == {0, 1, 2} and set(lab.variant_files) == {0, 1, 2}
+    assert set(lab.results) == set(uids(lab)) and set(lab.variant_files) == set(uids(lab))
     for column in lab.columns:
         assert "Ausschnitt:" in column.result.text() and "Ganzes Video: etwa" in column.result.text()
     assert all(view.has_image() for view in lab.views)
-    sizes = [lab.results[i][0] for i in range(3)]
+    sizes = [lab.results[u][0] for u in uids(lab)]
     assert sizes[0] < sizes[1] < sizes[2]
 
 
@@ -315,6 +319,7 @@ def test_the_detail_bar_offers_the_lab_next_to_process_next(qapp, make_gui, tmp_
     gui = make_gui()
     gui.show()
     gui.model.reset([VideoRow(src=video, dst=tmp_path / "a_x.mp4", size=1, duration=12.0, root=tmp_path)])
+    gui.scan_items = [{"path": video, "dst_path": tmp_path / "a_x.mp4", "size": 1, "exists_compressed": False}]
     gui.table.selectRow(0)
     qapp.processEvents()
     texts = [b.text() for b in gui.detail_bar.findChildren(QPushButton)]
@@ -323,8 +328,8 @@ def test_the_detail_bar_offers_the_lab_next_to_process_next(qapp, make_gui, tmp_
     opened = []
 
     class Stub:
-        def __init__(self, *args):
-            opened.append(args)
+        def __init__(self, *args, **kwargs):
+            opened.append((*args, kwargs))
 
         def show(self):
             pass
@@ -333,8 +338,9 @@ def test_the_detail_bar_offers_the_lab_next_to_process_next(qapp, make_gui, tmp_
     gui.combo_renderer.setCurrentIndex(0)
     gui.slider_crf.setValue(31)
     gui.open_lab(gui.model.rows[0])
-    src, duration, settings, callback, parent = opened[0]
+    src, duration, settings, callback, parent, kwargs = opened[0]
     assert src == video and duration == 12.0 and settings['crf'] == 31 and parent is gui
+    assert kwargs == {'queue': (1, pytest.approx(12.0))}
     callback({**settings, 'crf': 19})
     assert gui.slider_crf.value() == 19
 
@@ -370,7 +376,7 @@ def test_lab_worker_reports_progress_for_each_variant(qapp, tmp_path):
     clip = make_clip(tmp_path / "a.mp4", seconds=8, size="1280x720")
     (tmp_path / "lab").mkdir()
     progress = []
-    worker = LabWorker(clip, (0, 8), variant_defaults({**BASE, 'preset': 'medium'})[:2], tmp_path / "lab", 25)
+    worker = LabWorker(clip, (0, 8), list(enumerate(variant_defaults({**BASE, 'preset': 'medium'})[:2])), tmp_path / "lab", 25)
     worker.variant_progress.connect(lambda i, p: progress.append((i, p)))
     worker.run()
     for index in (0, 1):
@@ -422,10 +428,11 @@ def test_removing_a_variant_keeps_the_results_of_the_others(qapp, lab):
     lab.encode()
     wait_for_thread(qapp, lab.lab_worker)
     wait_for_thread(qapp, lab.frame_worker)
-    sizes = {i: lab.results[i][0] for i in range(3)}
+    first, second, third = uids(lab)
+    sizes = {u: lab.results[u] for u in (first, second, third)}
     lab.remove_variant(1)
-    assert lab.results == {0: (sizes[0], lab.results[0][1]), 1: (sizes[2], lab.results[1][1])}
-    assert set(lab.variant_files) == {0, 1}
+    assert lab.results == {first: sizes[first], third: sizes[third]}
+    assert set(lab.variant_files) == {first, third} and uids(lab) == [first, third]
 
 
 @requires_ffmpeg
@@ -455,8 +462,8 @@ def test_the_part_can_start_anywhere_and_be_as_long_as_the_video(qapp, lab):
     lab.spin_length.setValue(2)
     lab.encode()
     wait_for_thread(qapp, lab.lab_worker)
-    for i in range(3):
-        duration = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", lab.variant_files[i]],
+    for uid in uids(lab):
+        duration = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", lab.variant_files[uid]],
                                         capture_output=True, text=True).stdout)
         assert duration == pytest.approx(2, abs=0.35)
 
@@ -475,7 +482,7 @@ def test_an_hdr_video_stays_hdr_in_every_variant_and_gets_frames(qapp, tmp_path)
     wait_for_thread(qapp, dialog.lab_worker)
     wait_for_thread(qapp, dialog.frame_worker)
     spin(300)
-    assert set(dialog.variant_files) == {0, 1, 2}
+    assert set(dialog.variant_files) == set(uids(dialog))
     for path in dialog.variant_files.values():
         info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                                "stream=profile,pix_fmt,color_transfer,color_primaries", "-of", "csv=p=0", path],
@@ -548,8 +555,177 @@ def test_lower_quality_variants_of_the_gradients_are_smaller_and_stay_hlg(qapp):
     wait_for_thread(qapp, dialog.lab_worker)
     wait_for_thread(qapp, dialog.frame_worker)
     spin(300)
-    sizes = [dialog.results[i][0] for i in range(3)]
+    sizes = [dialog.results[u][0] for u in uids(dialog)]
     assert sizes[0] < sizes[1] < sizes[2]
     assert all(probe_video(path)["color_transfer"] == "arib-std-b67" for path in dialog.variant_files.values())
     assert all(view.has_image() for view in dialog.views)
+    dialog.close()
+
+
+# --- only new or changed variants are encoded, view controls, portrait videos, time estimates ----------------------------
+
+def encode_and_wait(qapp, dialog):
+    dialog.encode()
+    wait_for_thread(qapp, dialog.lab_worker)
+    wait_for_thread(qapp, dialog.frame_worker)
+    spin(200)
+
+
+@requires_ffmpeg
+def test_adding_a_variant_encodes_only_the_new_one(qapp, lab):
+    encode_and_wait(qapp, lab)
+    before = {u: (lab.results[u], lab.variant_files[u]) for u in uids(lab)}
+    stamps = {u: Path(lab.variant_files[u]).stat().st_mtime_ns for u in uids(lab)}
+    lab.add_variant()
+    new = uids(lab)[-1]
+    encode_and_wait(qapp, lab)
+    assert set(lab.results) == set(uids(lab)) and len(uids(lab)) == 4
+    for uid in before:
+        assert lab.results[uid] == before[uid][0]                                  # untouched, not encoded again
+        assert Path(lab.variant_files[uid]).stat().st_mtime_ns == stamps[uid]
+    assert new in lab.results
+
+
+@requires_ffmpeg
+def test_a_changed_variant_is_marked_and_encoded_again_alone(qapp, lab):
+    encode_and_wait(qapp, lab)
+    first, second, third = lab.columns
+    kept = {c.uid: lab.results[c.uid] for c in (first, third)}
+    nice_text, old_result = second.result.text(), lab.results[second.uid]
+    second.spin_quality.setValue(second.spin_quality.value() + 5)
+    assert "Geändert" in second.result.text() and "Geändert" not in first.result.text()
+    second.spin_quality.setValue(second.spin_quality.value() - 5)                   # changed back: the result is valid again
+    assert second.result.text() == nice_text
+    second.spin_quality.setValue(second.spin_quality.value() + 5)
+    encode_and_wait(qapp, lab)
+    assert {c.uid: lab.results[c.uid] for c in (first, third)} == kept
+    assert lab.results[second.uid] != old_result and "Geändert" not in second.result.text()
+
+
+@requires_ffmpeg
+def test_a_new_part_makes_every_variant_out_of_date(qapp, lab):
+    encode_and_wait(qapp, lab)
+    lab.spin_length.setValue(3)
+    assert all("Geändert" in c.result.text() for c in lab.columns)
+    encode_and_wait(qapp, lab)
+    assert all(lab.is_up_to_date(c) for c in lab.columns) and all("Geändert" not in c.result.text() for c in lab.columns)
+
+
+@requires_ffmpeg
+def test_pressing_encode_without_changes_does_nothing(qapp, lab):
+    encode_and_wait(qapp, lab)
+    lab.encode()
+    assert not lab.encoding() and "aktuell" in lab.status.text()
+
+
+def test_zoom_steps_walk_through_the_levels():
+    from archive_helper.compressor.lab import next_zoom
+
+    assert next_zoom(None, +1) == 1.0 and next_zoom(None, -1) == 0.5
+    assert next_zoom(1.0, +1) == 2.0 and next_zoom(1.0, -1) == 0.5 and next_zoom(0.25, -1) == 0.25
+    assert next_zoom(8.0, +1) == 8.0 and next_zoom(0.5, +1) == 1.0
+
+
+def test_frame_steps_stay_inside_the_part():
+    from archive_helper.compressor.lab import step_position
+
+    assert step_position(1.0, 5, 25, 10) == pytest.approx(1.2)
+    assert step_position(1.0, -10, 25, 10) == pytest.approx(0.6)
+    assert step_position(0.1, -10, 25, 10) == 0
+    assert step_position(9.9, 10, 25, 10) == pytest.approx(9.96)                  # the last frame, not beyond the part
+    assert step_position(0, 1, None, 10) == pytest.approx(0.04)                   # unknown frame rate: 25 fps
+
+
+def test_portrait_clips_are_shown_with_their_displayed_size():
+    from archive_helper.compressor.lab import display_size
+
+    assert display_size(3840, 2160, 90) == (2160, 3840) and display_size(3840, 2160, 270) == (2160, 3840)
+    assert display_size(3840, 2160, 0) == (3840, 2160) and display_size(3840, 2160, 180) == (3840, 2160)
+
+
+@requires_ffmpeg
+def test_view_buttons_zoom_rotate_and_step_frames(qapp, lab):
+    lab.btn_zoom_in.click()
+    assert lab.current_zoom == 1.0 and lab.zoom_buttons[1.0].isChecked() and all(v.zoom == 1.0 for v in lab.views)
+    lab.btn_zoom_in.click()
+    lab.btn_zoom_out.click()
+    lab.btn_zoom_out.click()
+    assert lab.current_zoom == 0.5 and lab.zoom_buttons[0.5].isChecked() and not lab.zoom_buttons[1.0].isChecked()
+    lab.zoom_buttons[None].click()
+    assert lab.current_zoom is None and lab.zoom_buttons[None].isChecked()
+    lab.btn_rotate.click()
+    assert lab.angle == 90 and all(v.angle == 90 for v in lab.views)
+    for _ in range(3):
+        lab.btn_rotate.click()
+    assert lab.angle == 0
+    lab.step_buttons[-1].click()                                                     # +10 frames
+    assert lab.frame_position == pytest.approx(10 / 25) and "Bild 10" in lab.frame_label.text()
+    lab.step_buttons[0].click()
+    lab.step_buttons[0].click()
+    assert lab.frame_position == 0
+    assert lab.slider_frame.value() == 0
+
+
+@requires_ffmpeg
+def test_new_variants_start_with_the_current_zoom_and_rotation(qapp, lab):
+    lab.set_zoom(2.0)
+    lab.set_angle(90)
+    lab.add_variant()
+    assert lab.column_views[-1].zoom == 2.0 and lab.column_views[-1].angle == 90
+
+
+@requires_ffmpeg
+def test_rotated_frames_are_fitted_completely_into_the_view(qapp, lab):
+    encode_and_wait(qapp, lab)
+    lab.resize(1400, 800)
+    lab.set_angle(90)
+    qapp.processEvents()
+    for view in lab.views:
+        shown = view.shown_rect()
+        port = view.viewport().rect()
+        assert port.contains(shown.adjusted(1, 1, -1, -1))                          # nothing is cut off
+        assert shown.height() > shown.width() * 1.3                                  # a 16:9 frame turned: tall
+
+
+@requires_ffmpeg
+def test_the_original_shows_its_frame_rate(qapp, lab):
+    texts = [label.text() for label in lab.original.findChildren(type(lab.status))]
+    assert any("25 fps" in t and "640 × 360" in t for t in texts)
+
+
+@requires_ffmpeg
+def test_portrait_phone_clips_get_upright_frames_in_every_column(qapp, tmp_path):
+    from archive_helper.compressor.lab import CompressionLabDialog
+
+    landscape = make_clip(tmp_path / "land.mp4", seconds=3, size="640x360")
+    portrait = tmp_path / "portrait.mov"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-display_rotation", "90", "-i", str(landscape), "-c", "copy", str(portrait)],
+                   check=True)
+    dialog = CompressionLabDialog(portrait, None, {**BASE, 'limit_res': False}, lambda s: None)
+    dialog.show()
+    assert dialog.rotation in (90, 270) and dialog.frame_size == (360, 640)
+    texts = [label.text() for label in dialog.original.findChildren(type(dialog.status))]
+    assert any("360 × 640" in t for t in texts)
+    encode_and_wait(qapp, dialog)
+    sizes = {(v.item.pixmap().width(), v.item.pixmap().height()) for v in dialog.views}
+    assert sizes == {(360, 640)}                                                    # all upright and not squeezed
+    dialog.close()
+
+
+@requires_ffmpeg
+def test_the_time_of_the_whole_folder_is_estimated_and_remembered(qapp, tmp_path):
+    from archive_helper.compressor.lab import CompressionLabDialog
+    from archive_helper.compressor.utils import EncodeSpeeds
+
+    clip = make_clip(tmp_path / "a.mp4", seconds=4)
+    dialog = CompressionLabDialog(clip, None, dict(BASE), lambda s: None, queue=(40, 7200.0))
+    dialog.show()
+    encode_and_wait(qapp, dialog)
+    for column in dialog.columns:
+        assert "Alle 40 Videos: etwa" in column.result.text()
+    speeds = EncodeSpeeds()
+    for column in dialog.columns:
+        settings = column.settings()
+        seconds, exact = speeds.estimate(settings, 1, 3600)
+        assert exact and seconds > 0
     dialog.close()

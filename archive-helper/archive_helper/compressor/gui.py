@@ -23,7 +23,7 @@ from video_helper_core.dialogs import confirm_after_delay
 from video_helper_core.keep_awake import KeepAwake
 from video_helper_core.notify import notify
 from .utils import (
-    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, clear_caches, collect_videos, common_parent, format_size, open_in_finder, parse_excludes,
+    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, EncodeSpeeds, check_dependencies, clean_postfix, clear_caches, collect_videos, common_parent, format_duration_long, format_size, open_in_finder, parse_excludes,
     prune_thumbnails,
 )
 from .lab import CompressionLabDialog
@@ -59,17 +59,6 @@ def describe_vt(value):
     if value < 80:
         return tr("Very high quality, almost visually lossless.")
     return tr("Visually lossless; files can get very large.")
-
-
-def format_duration_long(seconds):
-    minutes = max(1, round(seconds / 60))
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
-    if days:
-        return tr("{days} d {hours} h", days=days, hours=hours)
-    if hours:
-        return tr("{hours} h {minutes} min", hours=hours, minutes=minutes)
-    return tr("{minutes} min", minutes=minutes)
 
 
 def nearest_existing(path):
@@ -169,6 +158,9 @@ class ArchiverGUI(QWidget):
         self.scan_timer.timeout.connect(self.auto_scan)
         self.summary_timer = QTimer(self, singleShot=True, interval=200)
         self.summary_timer.timeout.connect(self.refresh_summary)
+        self.speeds = EncodeSpeeds()   # how long encodes took before: the basis of the time estimate
+        self.file_started = {}
+        self.run_settings, self.run_jobs, self.run_paused = None, 1, False
         self.keep_awake = KeepAwake(reason="Videos are being compressed")
         self.notifier = notify   # replaced in tests
         self.stopped_by_user = False
@@ -239,6 +231,10 @@ class ArchiverGUI(QWidget):
         self.drawer = self.build_drawer()
         root.addWidget(self.drawer)
 
+        for signal in (self.combo_renderer.currentIndexChanged, self.combo_preset.currentTextChanged,
+                       self.combo_res.currentIndexChanged, self.combo_fps.currentIndexChanged,
+                       self.spin_jobs.currentTextChanged, self.cb_dry_run.toggled):
+            signal.connect(self.request_summary)   # the time estimate depends on them
         self.drop_overlay = DropOverlay(self, self.drawer)
         self.drop_overlay.dropped.connect(self.on_paths_dropped)
         # The fields would take a drop themselves; all drops go through the overlay so Source/Target are clear.
@@ -411,7 +407,8 @@ class ArchiverGUI(QWidget):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(28)
         self.summary_values = {}
-        for key, label in (("count", tr("Videos")), ("size", tr("Size")), ("saving", tr("Savings")), ("free", tr("Free at target"))):
+        for key, label in (("count", tr("Videos")), ("size", tr("Size")), ("saving", tr("Savings")), ("time", tr("Estimated time")),
+                           ("free", tr("Free at target"))):
             column = QVBoxLayout()
             column.setSpacing(0)
             caption_label = caption(label)
@@ -998,6 +995,7 @@ class ArchiverGUI(QWidget):
         queue = self.queue_items()
         for item in queue:  # re-runs (overwrite, retry) start from a clean row
             self.model.update(item['path'], status="planned", progress=0, speed="", note="")
+        self.run_settings, self.run_jobs, self.run_paused, self.file_started = settings, self.spin_jobs.value(), False, {}
         self.run_paths = {str(item['path']) for item in queue}
         self.run_bytes = sum(item['size'] for item in queue)
         self.run_started = time.monotonic()
@@ -1040,6 +1038,7 @@ class ArchiverGUI(QWidget):
             self.btn_pause.setText(tr("Pause"))
         else:
             self.paused_at = time.monotonic()
+            self.run_paused = True   # the times of this run no longer say how fast encoding is
             self.worker.pause()
             self.update_keep_awake()                                # nothing runs, the computer may sleep
             self.btn_pause.setText(tr("Resume"))
@@ -1055,8 +1054,11 @@ class ArchiverGUI(QWidget):
     @Slot(str, str, str, dict)
     def on_status_update(self, path, status, reason, data):
         if status == "running":
+            self.file_started.setdefault(path, time.monotonic())
             self.model.update(path, status="running", speed=reason)
             return
+        if status == "finished":
+            self.record_speed(path)
         values = {"status": status, "note": reason, "speed": ""}
         if status in ("finished", "skipped") and data:
             values["out_size"] = data.get('dst_size')
@@ -1068,6 +1070,15 @@ class ArchiverGUI(QWidget):
             values["status"] = "done"
         self.model.update(path, **values)
         self.update_detail_bar()
+
+    def record_speed(self, path):
+        """Remembers how long this video took, for the time estimate of the next folder."""
+        started = self.file_started.pop(path, None)
+        row = self.model.row_for(path)
+        if (started is None or row is None or not row.duration or self.run_paused or not self.run_settings
+                or self.run_settings.get('dry_run')):
+            return
+        self.speeds.record(self.run_settings, self.run_jobs, row.duration, time.monotonic() - started)
 
     @Slot(str, object)
     def on_thumbnail_ready(self, path, image):
@@ -1151,6 +1162,8 @@ class ArchiverGUI(QWidget):
                              tone="good" if saved >= 0 else "warn",
                              tooltip=tr("Based on the videos already compressed (ratio {ratio:.0%}).", ratio=ratio))
 
+        self.refresh_time_estimate()
+
         if self.selection is not None and not self.txt_dst.text().strip():
             target = nearest_existing(self.scan_root())
         else:
@@ -1166,6 +1179,35 @@ class ArchiverGUI(QWidget):
 
         self.progress_text.setText(self.progress_message(rows, counts))
         self.update_run_enabled()
+
+    def queue_video_seconds(self):
+        """(seconds of video still to compress, number of videos whose length is not known yet)."""
+        rows = [self.model.row_for(item['path']) for item in self.queue_items()]
+        known = [row.duration for row in rows if row.duration]
+        total = sum(known)
+        unknown = len(rows) - len(known)
+        if unknown and known:
+            total += unknown * total / len(known)    # videos not read yet count like the average one
+        return total, unknown, len(rows)
+
+    def refresh_time_estimate(self):
+        seconds, unknown, count = self.queue_video_seconds()
+        if not count:
+            self.set_summary("time", "–")
+            return
+        estimate = self.speeds.estimate(self.current_run_settings(), self.spin_jobs.value(), seconds) if seconds else None
+        if estimate is None:
+            hint = tr("Unknown until a video was compressed with these settings, or tried out with “Inspect different compressions”.")
+            self.set_summary("time", "–", tooltip=hint)
+            return
+        total, exact = estimate
+        text = f"≈ {format_duration_long(total)}"
+        tooltip = tr("Based on how long encodes with these settings took before.")
+        if not exact:
+            tooltip += " " + tr("Measured with a different number of parallel videos, so this is a cautious guess.")
+        if unknown:
+            tooltip += " " + tr("{count} videos have not been read yet; they count like the average.", count=unknown)
+        self.set_summary("time", text, tooltip=tooltip)
 
     def set_summary(self, key, text, tone=None, tooltip=""):
         _, label = self.summary_values[key]
@@ -1324,8 +1366,9 @@ class ArchiverGUI(QWidget):
 
     def open_lab(self, row):
         """Opens the compression lab for this video; the drawer's settings are its starting point."""
+        seconds, _, count = self.queue_video_seconds()
         self.lab_dialog = CompressionLabDialog(row.src, row.duration, self.current_run_settings(),
-                                               self.apply_run_settings, self)
+                                               self.apply_run_settings, self, queue=(count, seconds))
         self.lab_dialog.show()
 
     def compare(self, row):

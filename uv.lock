@@ -24,7 +24,7 @@ wheels = [
 
 [[package]]
 name = "analysis-helper"
-version = "0.0.1"
+version = "0.0.2"
 source = { editable = "analysis-helper" }
 dependencies = [
     { name = "fastapi" },
@@ -116,7 +116,7 @@ wheels = [
 
 [[package]]
 name = "archive-helper"
-version = "0.0.1"
+version = "0.0.2"
 source = { editable = "archive-helper" }
 dependencies = [
     { name = "pyside6" },

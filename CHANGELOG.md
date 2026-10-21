@@ -15,6 +15,10 @@ All notable changes to the two apps and the shared core. The format follows
   of the whole video and the encoding time. One frame of the original and of every variant is shown side by side, fitted
   or at 100 % / 200 %, and dragging one moves all views. HDR (HLG) frames are decoded with the BT.2020 matrix; there is no
   tone mapping, so they look a little flat. "Use these settings" puts a variant into the drawer. Not yet: playback.
+  Zoom has − / + and 50 % / 100 % / 200 %, a ⟳ button turns all views, and the frame can be moved by −10 … +10 frames.
+  Only new or changed variants are encoded again (a changed variant is marked until you press "Encode"); frames of
+  portrait phone clips are shown upright and unsqueezed; the original shows its frame rate. With the queue of the main
+  page each variant also shows how long the whole folder would take.
 - New sample for tests and for trying it out: `archive-helper/example_resources/hdr-gradient-hlg.mov` (HLG, BT.2020,
   10 bit, moving colour gradients and grey ramps where banding shows first; `tests/hdr_samples.py` builds it).
 - Internal: the ffmpeg call is built by `ArchiveWorker.build_ffmpeg_command`, used by the real run and the lab alike.
@@ -59,6 +63,12 @@ Archive Helper `archive-v0.0.2`, Analysis Helper `analysis-v0.0.2`.
   clicks on it. The native title is left empty there.
 - Fixed: the quality hint under the Small / Archive / High buttons changed its length and moved the controls below it
   while the CRF slider was dragged. The hint now has a fixed height.
+
+- New: **Estimated time** in the summary: how long the queue will take, from the encodes of earlier runs and of the
+  compression lab with the same encoder, preset, resolution and frame-rate limit (a cautious guess if only another number
+  of parallel videos was measured). Videos whose length is not known yet count like the average.
+- Fixed: in the compare viewer the Rotate button is a small ⟳ in the title row; a turned landscape clip is fitted as the
+  portrait picture it now is, and "Reset view" keeps the rotation.
 
 ### Analysis Helper
 - Fixed: the same title bar problem as in Archive Helper (shared window shell).

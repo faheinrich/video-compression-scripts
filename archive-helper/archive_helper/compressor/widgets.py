@@ -213,9 +213,10 @@ class ZoomableVideoView(QGraphicsView):
         self.zoom_factor = 1.0
 
     def frame_rect(self):
-        # Not boundingRect(): for rotated clips Qt computes it from the unrotated native
-        # size, while the frame is drawn into the item's full size.
-        return QRectF(self.video_item.pos(), self.video_item.size())
+        # Not boundingRect(): for rotated clips Qt computes it from the unrotated native size, while the frame is
+        # drawn into the item's full size. mapRectToScene applies the item's own rotation (the Rotate button), so a
+        # turned landscape clip is fitted as the portrait picture it now is.
+        return self.video_item.mapRectToScene(QRectF(QPointF(0, 0), self.video_item.size()))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -237,7 +238,16 @@ class ZoomableVideoView(QGraphicsView):
             self.scale(rel_scale, rel_scale)
             self.zoom_factor = factor
 
+    def rotate_by(self, degrees=90):
+        """Turns the picture and fits the turned picture into the view again."""
+        rect = QRectF(QPointF(0, 0), self.video_item.size())
+        self.video_item.setTransformOriginPoint(rect.center())
+        self.video_item.setRotation((self.video_item.rotation() + degrees) % 360)
+        self.setSceneRect(self.frame_rect())
+        self.reset_view()
+
     def reset_view(self):
+        self.setSceneRect(self.frame_rect())
         self.fitInView(self.frame_rect(), Qt.KeepAspectRatio)
         self.zoom_factor = 1.0
         self.zoom_changed.emit(1.0)
@@ -280,12 +290,9 @@ class CompareVideoDialog(QDialog):
         orig_lbl = QLabel(tr("<b>Original (scroll to zoom, drag to pan)</b><br>{meta}", meta=orig_meta))
         orig_lbl.setAlignment(Qt.AlignCenter)
         orig_container = QVBoxLayout()
-        orig_container.addWidget(orig_lbl)
+        self.btn_rotate_orig = self.rotate_button(self.view_orig)
+        orig_container.addLayout(self.header_row(orig_lbl, self.btn_rotate_orig))
         orig_container.addWidget(self.view_orig, stretch=1)
-        
-        self.btn_rotate_orig = QPushButton(tr("🔄 Rotate"))
-        self.btn_rotate_orig.clicked.connect(lambda: self.rotate_video(self.view_orig))
-        orig_container.addWidget(self.btn_rotate_orig)
         
         video_layout.addLayout(orig_container, stretch=1)
         
@@ -306,12 +313,9 @@ class CompareVideoDialog(QDialog):
             comp_lbl = QLabel(tr("<b>Compressed (scroll to zoom, drag to pan)</b><br>{meta}", meta=comp_meta))
             comp_lbl.setAlignment(Qt.AlignCenter)
             comp_container = QVBoxLayout()
-            comp_container.addWidget(comp_lbl)
+            self.btn_rotate_comp = self.rotate_button(self.view_comp)
+            comp_container.addLayout(self.header_row(comp_lbl, self.btn_rotate_comp))
             comp_container.addWidget(self.view_comp, stretch=1)
-        
-            self.btn_rotate_comp = QPushButton(tr("🔄 Rotate"))
-            self.btn_rotate_comp.clicked.connect(lambda: self.rotate_video(self.view_comp))
-            comp_container.addWidget(self.btn_rotate_comp)
         
             video_layout.addLayout(comp_container, stretch=1)
         
@@ -407,12 +411,28 @@ class CompareVideoDialog(QDialog):
     def views(self):
         return [self.view_orig, self.view_comp] if self.has_comp else [self.view_orig]
 
+    def rotate_button(self, view):
+        button = QPushButton("⟳")
+        button.setToolTip(tr("Rotate by 90°"))
+        button.setFixedSize(34, 30)
+        button.clicked.connect(lambda: self.rotate_video(view))
+        return button
+
+    @staticmethod
+    def header_row(label, button):
+        """The title in the middle, the small rotate button at the right edge."""
+        row = QHBoxLayout()
+        spacer = QWidget()
+        spacer.setFixedWidth(button.width() if button.width() > 0 else 34)
+        row.addWidget(spacer)
+        row.addWidget(label, 1)
+        row.addWidget(button, 0, Qt.AlignTop)
+        return row
+
     def rotate_video(self, view):
-        rot = view.video_item.rotation()
-        # Set transform origin to center
-        rect = QRectF(QPointF(0, 0), view.video_item.size())
-        view.video_item.setTransformOriginPoint(rect.center())
-        view.video_item.setRotation(rot + 90)
+        view.rotate_by(90)
+        if view is self.view_orig or view is self.view_comp:
+            self.slider_zoom.setValue(100)
     
     def slider_zoom_changed(self, value):
         factor = value / 100.0

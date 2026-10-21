@@ -4,6 +4,8 @@ Each variant is encoded for the chosen part only (same ffmpeg call as the real r
 ArchiveWorker.build_ffmpeg_command), so the size of the whole video can be estimated and one frame of every
 variant can be looked at next to the original, at 100 % or 200 %, with the views scrolling together.
 """
+import itertools
+import json
 import os
 import shutil
 import signal
@@ -23,13 +25,18 @@ from PySide6.QtWidgets import (
 from video_helper_core.i18n import tr
 from video_helper_core.style import STYLE, caption
 from .options import FRAME_RATES, QUALITY_PRESETS, RENDERERS, RESOLUTIONS, X265_PRESETS
-from .utils import format_size, get_hdr_color, get_resolution_and_fps, get_video_info, parse_ffmpeg_time
+from .utils import (
+    EncodeSpeeds, format_duration_long, format_size, get_display_rotation, get_hdr_color, get_resolution_and_fps, get_video_info,
+    parse_ffmpeg_time,
+)
 from .workers import ArchiveWorker
 
 MAX_VARIANTS = 8
 DEFAULT_VARIANTS = 3
 DEFAULT_SEGMENT_SECONDS = 10
 MIN_COLUMN_WIDTH = 300
+ZOOM_LEVELS = [0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0]
+FRAME_STEPS = [-10, -5, -1, 1, 5, 10]
 
 
 def estimate_total_size(segment_bytes, segment_seconds, total_seconds):
@@ -44,6 +51,28 @@ def default_segment(duration, length=DEFAULT_SEGMENT_SECONDS):
     if duration:
         length = int(min(length, max(1, duration)))
     return 0, length
+
+
+def next_zoom(current, direction):
+    """The zoom one step in or out (direction +1 / -1); from "fit" (None) the first step is 100 % in, 50 % out."""
+    if current is None:
+        return 1.0 if direction > 0 else 0.5
+    levels = [z for z in ZOOM_LEVELS if (z > current + 1e-9 if direction > 0 else z < current - 1e-9)]
+    if not levels:
+        return current
+    return min(levels) if direction > 0 else max(levels)
+
+
+def step_position(position, frames, fps, length):
+    """The frame position (seconds into the part) after moving by `frames`, kept inside the part."""
+    fps = fps or 25
+    last = max(0.0, length - 1 / fps)
+    return round(min(last, max(0.0, position + frames / fps)), 4)
+
+
+def display_size(width, height, rotation):
+    """Size of the picture as shown: portrait phone clips are stored as landscape and carry a rotation."""
+    return (height, width) if rotation % 180 == 90 else (width, height)
 
 
 def next_variant(settings):
@@ -93,16 +122,16 @@ def kill_process(process):
 
 
 class LabWorker(QThread):
-    """Encodes the variants one after the other. Signals: variant_started(i), variant_progress(i, percent),
-    variant_done(i, path, bytes, seconds), variant_failed(i, message)."""
+    """Encodes the given variants one after the other. jobs: list of (uid, settings). Signals: variant_started(uid),
+    variant_progress(uid, percent), variant_done(uid, path, bytes, seconds), variant_failed(uid, message)."""
     variant_started = Signal(int)
     variant_progress = Signal(int, int)
     variant_done = Signal(int, str, int, float)
     variant_failed = Signal(int, str)
 
-    def __init__(self, src, segment, variants, outdir, src_fps, parent=None):
+    def __init__(self, src, segment, jobs, outdir, src_fps, parent=None):
         super().__init__(parent)
-        self.src, self.segment, self.variants = Path(src), segment, variants
+        self.src, self.segment, self.jobs = Path(src), segment, list(jobs)
         self.outdir, self.src_fps = Path(outdir), src_fps
         self._stopped = False
         self.process = None
@@ -113,11 +142,12 @@ class LabWorker(QThread):
             kill_process(self.process)
 
     def run(self):
-        for index, settings in enumerate(self.variants):
+        for index, settings in self.jobs:
             if self._stopped:
                 return
             self.variant_started.emit(index)
             out = self.outdir / f"variant_{index}.mp4"
+            out.unlink(missing_ok=True)
             try:
                 command = ArchiveWorker(self.src.parent, self.outdir, 1, [], settings).build_ffmpeg_command(
                     self.src, out, self.src_fps, self.segment)
@@ -202,7 +232,7 @@ class FrameWorker(QThread):
 
 
 class ZoomImageView(QGraphicsView):
-    """One frame that can be shown fitted, at 100 % or at 200 % and dragged around."""
+    """One frame that can be shown fitted or at a fixed zoom, turned by 90° steps, and dragged around."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -214,6 +244,7 @@ class ZoomImageView(QGraphicsView):
         self.setRenderHints(QPainter.SmoothPixmapTransform)
         self.setMinimumSize(220, 160)
         self.zoom = None   # None = fit into the view
+        self.angle = 0
         self.setStyleSheet("background: #1d1d1f; border: none;")
 
     def set_image(self, image):
@@ -231,14 +262,23 @@ class ZoomImageView(QGraphicsView):
         self.zoom = zoom
         self.apply_zoom()
 
+    def set_angle(self, angle):
+        self.angle = angle % 360
+        self.apply_zoom()
+
     def apply_zoom(self):
         self.resetTransform()
         if not self.has_image():
             return
+        self.rotate(self.angle)
         if self.zoom is None:
             self.fitInView(self.item, Qt.KeepAspectRatio)
         else:
             self.scale(self.zoom, self.zoom)
+
+    def shown_rect(self):
+        """The picture's area in view coordinates (for tests and for fitting)."""
+        return self.mapFromScene(self.item.sceneBoundingRect()).boundingRect()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -250,8 +290,12 @@ class VariantColumn(QFrame):
     """The settings of one variant, its progress and its result. The frames are shown in a row of their own below all
     columns, so every view has the same size and the views scroll together exactly."""
 
+    changed = Signal()
+    _uids = itertools.count(1)
+
     def __init__(self, title, settings, parent=None):
         super().__init__(parent)
+        self.uid = next(self._uids)
         self.setObjectName("detailBar")
         self.setMinimumWidth(MIN_COLUMN_WIDTH)
         layout = QVBoxLayout(self)
@@ -297,7 +341,7 @@ class VariantColumn(QFrame):
         self.result = QLabel(tr("Not encoded yet"))
         self.result.setProperty("role", "hint")
         self.result.setWordWrap(True)
-        self.result.setMinimumHeight(self.result.fontMetrics().lineSpacing() * 3)
+        self.result.setMinimumHeight(self.result.fontMetrics().lineSpacing() * 4)
         self.result.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         layout.addWidget(self.result)
         self.use_button = QPushButton(tr("Use these settings"))
@@ -305,6 +349,14 @@ class VariantColumn(QFrame):
 
         self.combo_encoder.currentIndexChanged.connect(self.encoder_changed)
         self.set_settings(settings)
+        for signal in (self.combo_encoder.currentIndexChanged, self.spin_quality.valueChanged,
+                       self.combo_preset.currentIndexChanged, self.combo_res.currentIndexChanged,
+                       self.combo_fps.currentIndexChanged):
+            signal.connect(lambda *_: self.changed.emit())
+
+    def settings_key(self):
+        """Identifies the settings (for telling whether a variant has to be encoded again)."""
+        return json.dumps(self.settings(), sort_keys=True)
 
     def set_title(self, text):
         self.title.setText(text.upper())
@@ -343,36 +395,48 @@ class VariantColumn(QFrame):
 
 
 class CompressionLabDialog(QDialog):
-    """Opens for one video. apply_settings(settings) is called when the user takes a variant's settings."""
+    """Opens for one video. apply_settings(settings) is called when the user takes a variant's settings.
+    queue=(number of videos, seconds of video) of the folder to be compressed, for the time estimate of the whole run."""
 
-    def __init__(self, src, duration, base_settings, apply_settings, parent=None):
+    def __init__(self, src, duration, base_settings, apply_settings, parent=None, queue=None):
         super().__init__(parent)
         self.setStyleSheet(STYLE)
         self.setWindowTitle(tr("Inspect different compressions: {name}", name=Path(src).name))
         self.resize(1500, 860)
         self.src = Path(src)
         self.apply_settings = apply_settings
+        self.queue = queue
+        self.speeds = EncodeSpeeds()
         probed_duration, self.fps, _ = get_video_info(self.src)
         self.duration = duration or probed_duration
-        width, height, _ = get_resolution_and_fps(self.src)
-        self.frame_size = (int(width), int(height)) if width and height else None
+        width, height, source_fps = get_resolution_and_fps(self.src)
+        self.rotation = get_display_rotation(self.src)
+        self.frame_size = display_size(int(width), int(height), self.rotation) if width and height else None
+        self.source_fps = source_fps or self.fps
         self.hdr = bool(get_hdr_color(self.src))
         self.tmpdir = Path(tempfile.mkdtemp(prefix="vht-lab-"))
         self.lab_worker = self.frame_worker = None
-        self.variant_files = {}      # index -> path of the encoded part
-        self.results = {}            # index -> (bytes, seconds)
+        self.variant_files = {}      # uid -> path of the encoded part
+        self.results = {}            # uid -> (bytes, seconds)
+        self.result_text = {}        # uid -> text shown when the variant is up to date
+        self.encoded = {}            # uid -> (settings key, part) it was encoded with
+        self.encoding_info = {}      # uid -> (settings key, settings, part) of the running job
+        self.to_encode = []          # uids of the current run
         self.finished_seconds = []   # encoding times of the variants done in this run
-        self.running = None          # (index, started at, progress 0..1)
+        self.running = None          # (uid, started at, progress 0..1)
+        self.frame_position = 0.0    # seconds into the part
+        self.angle = 0
+        self.current_zoom = None
         self.frame_timer = QTimer(self, singleShot=True, interval=250)
         self.frame_timer.timeout.connect(self.load_frames)
         self.syncing = False
 
         layout = QVBoxLayout(self)
         layout.addLayout(self.build_controls())
+        layout.addLayout(self.build_view_controls())
 
         # One grid for the settings and the frames, in a scroll area: with many variants it scrolls sideways.
         self.grid = QGridLayout()
-        self.grid.setColumnMinimumWidth(0, MIN_COLUMN_WIDTH)
         content = QWidget()
         content.setLayout(self.grid)
         self.scroll = QScrollArea()
@@ -392,6 +456,7 @@ class CompressionLabDialog(QDialog):
         self.status = QLabel(tr("Choose the part and the settings, then press “Encode”."))
         self.status.setProperty("role", "hint")
         layout.addWidget(self.status)
+        self.update_frame_label()
         self.load_frames()
 
     # ---------------------------------------------------------------------------------- layout
@@ -415,6 +480,8 @@ class CompressionLabDialog(QDialog):
         self.spin_length.setValue(length)
         self.spin_length.setMinimumWidth(80)
         row.addWidget(self.spin_length)
+        for spin in (self.spin_start, self.spin_length):
+            spin.valueChanged.connect(self.part_changed)
         self.btn_encode = QPushButton(tr("Encode"))
         self.btn_encode.clicked.connect(self.encode)
         self.btn_cancel = QPushButton(tr("Cancel all"))
@@ -428,22 +495,56 @@ class CompressionLabDialog(QDialog):
         self.estimate_label.setProperty("role", "hint")
         row.addWidget(self.estimate_label)
         row.addStretch()
+        return row
 
-        row.addWidget(QLabel(tr("Frame at")))
+    def build_view_controls(self):
+        """Which frame is shown, how large, and turned how."""
+        row = QHBoxLayout()
+        row.addWidget(QLabel(tr("Frame")))
         self.slider_frame = QSlider(Qt.Horizontal)
         self.slider_frame.setRange(0, 1000)
-        self.slider_frame.setValue(500)
-        self.slider_frame.setFixedWidth(200)
-        self.slider_frame.valueChanged.connect(lambda _: self.frame_timer.start())
+        self.slider_frame.setFixedWidth(220)
+        self.slider_frame.setValue(0)
+        self.slider_frame.valueChanged.connect(self.slider_moved)
         row.addWidget(self.slider_frame)
+        self.step_buttons = []
+        for frames in FRAME_STEPS:
+            button = QPushButton(f"{frames:+d}")
+            button.setToolTip(tr("{count} frames", count=f"{frames:+d}"))
+            button.setFixedWidth(40)
+            button.clicked.connect(lambda _=False, n=frames: self.step_frame(n))
+            self.step_buttons.append(button)
+            row.addWidget(button)
+        self.frame_label = QLabel()
+        self.frame_label.setProperty("role", "hint")
+        row.addWidget(self.frame_label)
+        row.addStretch()
+
+        row.addWidget(QLabel(tr("Zoom")))
+        self.btn_zoom_out = QPushButton("−")
+        self.btn_zoom_out.clicked.connect(lambda: self.set_zoom(next_zoom(self.current_zoom, -1)))
+        self.btn_zoom_in = QPushButton("+")
+        self.btn_zoom_in.clicked.connect(lambda: self.set_zoom(next_zoom(self.current_zoom, +1)))
+        for button in (self.btn_zoom_out, self.btn_zoom_in):
+            button.setFixedWidth(34)
+        row.addWidget(self.btn_zoom_out)
         self.zoom_group = QButtonGroup(self)
-        for text, zoom in ((tr("Fit"), None), ("100 %", 1.0), ("200 %", 2.0)):
+        self.zoom_group.setExclusive(False)
+        self.zoom_buttons = {}
+        for text, zoom in ((tr("Fit"), None), ("50 %", 0.5), ("100 %", 1.0), ("200 %", 2.0)):
             button = QPushButton(text)
             button.setCheckable(True)
-            button.setChecked(zoom is None)
             button.clicked.connect(lambda _=False, z=zoom: self.set_zoom(z))
             self.zoom_group.addButton(button)
+            self.zoom_buttons[zoom] = button
             row.addWidget(button)
+        row.addWidget(self.btn_zoom_in)
+        self.btn_rotate = QPushButton("⟳")
+        self.btn_rotate.setToolTip(tr("Rotate by 90°"))
+        self.btn_rotate.setFixedWidth(34)
+        self.btn_rotate.clicked.connect(lambda: self.set_angle(self.angle + 90))
+        row.addWidget(self.btn_rotate)
+        self.update_zoom_buttons()
         return row
 
     def build_original_column(self):
@@ -452,9 +553,16 @@ class CompressionLabDialog(QDialog):
         layout = QVBoxLayout(frame)
         layout.addWidget(caption(tr("Original")))
         size = self.src.stat().st_size if self.src.exists() else 0
-        resolution = f"{self.frame_size[0]} × {self.frame_size[1]}" if self.frame_size else "–"
-        info = QLabel(f"{format_size(size)} · {resolution}" + (" · HDR" if self.hdr else ""))
+        parts = [format_size(size)]
+        if self.frame_size:
+            parts.append(f"{self.frame_size[0]} × {self.frame_size[1]}")
+        if self.source_fps:
+            parts.append(f"{self.source_fps:g} fps")
+        if self.hdr:
+            parts.append("HDR")
+        info = QLabel(" · ".join(parts))
         info.setProperty("role", "hint")
+        info.setWordWrap(True)
         layout.addWidget(info)
         layout.addStretch(1)
         return frame
@@ -463,7 +571,7 @@ class CompressionLabDialog(QDialog):
         view = ZoomImageView()
         view.horizontalScrollBar().valueChanged.connect(lambda value, v=view: self.sync_scroll(v, "horizontalScrollBar", value))
         view.verticalScrollBar().valueChanged.connect(lambda value, v=view: self.sync_scroll(v, "verticalScrollBar", value))
-        view.set_zoom(self.current_zoom if hasattr(self, "current_zoom") else None)
+        view.zoom, view.angle = self.current_zoom, self.angle
         return view
 
     def sync_scroll(self, source, bar_name, value):
@@ -482,6 +590,7 @@ class CompressionLabDialog(QDialog):
         column = VariantColumn("", settings)
         column.use_button.clicked.connect(lambda _=False, c=column: self.use_variant(self.columns.index(c)))
         column.remove_button.clicked.connect(lambda _=False, c=column: self.remove_variant(self.columns.index(c)))
+        column.changed.connect(self.refresh_changed)
         self.columns.append(column)
         self.column_views.append(self.new_view())
 
@@ -512,26 +621,60 @@ class CompressionLabDialog(QDialog):
         if self.encoding() or len(self.columns) <= 1:
             return
         column, view = self.columns.pop(index), self.column_views.pop(index)
-        self.variant_files = {i if i < index else i - 1: p for i, p in self.variant_files.items() if i != index}
-        self.results = {i if i < index else i - 1: r for i, r in self.results.items() if i != index}
+        for table in (self.variant_files, self.results, self.result_text, self.encoded):
+            table.pop(column.uid, None)
         column.hide()
         view.hide()
         column.deleteLater()
         view.deleteLater()
         self.arrange()
 
-    # ---------------------------------------------------------------------------------- views
+    # ---------------------------------------------------------------------------------- view controls
     def set_zoom(self, zoom):
         self.current_zoom = zoom
         for view in self.views:
             view.set_zoom(zoom)
+        self.update_zoom_buttons()
+
+    def update_zoom_buttons(self):
+        for zoom, button in self.zoom_buttons.items():
+            button.setChecked(zoom == self.current_zoom)
+        self.btn_zoom_in.setEnabled(self.current_zoom is None or self.current_zoom < ZOOM_LEVELS[-1])
+        self.btn_zoom_out.setEnabled(self.current_zoom is None or self.current_zoom > ZOOM_LEVELS[0])
+
+    def set_angle(self, angle):
+        self.angle = angle % 360
+        for view in self.views:
+            view.set_angle(self.angle)
 
     def segment(self):
         return self.spin_start.value(), self.spin_length.value()
 
     def frame_seconds(self):
         """Second inside the part (0 .. length) of the chosen frame."""
-        return round(self.segment()[1] * self.slider_frame.value() / 1000, 2)
+        return self.frame_position
+
+    def slider_moved(self, value):
+        self.frame_position = round(self.segment()[1] * value / 1000, 3)
+        self.update_frame_label()
+        self.frame_timer.start()
+
+    def step_frame(self, frames):
+        self.frame_position = step_position(self.frame_position, frames, self.source_fps, self.segment()[1])
+        self.sync_slider()
+        self.update_frame_label()
+        self.frame_timer.start()
+
+    def sync_slider(self):
+        length = self.segment()[1] or 1
+        self.slider_frame.blockSignals(True)
+        self.slider_frame.setValue(int(round(self.frame_position / length * 1000)))
+        self.slider_frame.blockSignals(False)
+
+    def update_frame_label(self):
+        fps = self.source_fps or 25
+        self.frame_label.setText(tr("{seconds:.2f} s into the part (frame {number})",
+                                    seconds=self.frame_position, number=int(round(self.frame_position * fps))))
 
     def load_frames(self):
         if self.frame_worker is not None:
@@ -540,8 +683,8 @@ class CompressionLabDialog(QDialog):
         start, _ = self.segment()
         seconds = self.frame_seconds()
         jobs = [("original", self.src, start + seconds, None, self.hdr)]
-        for index, path in sorted(self.variant_files.items()):
-            jobs.append((str(index), path, seconds, self.frame_size, self.hdr))
+        for uid, path in sorted(self.variant_files.items()):
+            jobs.append((str(uid), path, seconds, self.frame_size, self.hdr))
         self.frame_worker = FrameWorker(jobs, self)
         self.frame_worker.frame_ready.connect(self.on_frame_ready)
         self.frame_worker.start()
@@ -549,72 +692,120 @@ class CompressionLabDialog(QDialog):
     def on_frame_ready(self, key, image):
         if key == "original":
             self.original_view.set_image(image)
-        elif int(key) < len(self.column_views):
-            self.column_views[int(key)].set_image(image)
+            return
+        for column, view in zip(self.columns, self.column_views):
+            if column.uid == int(key):
+                view.set_image(image)
 
     # ---------------------------------------------------------------------------------- encoding
     def encoding(self):
         return self.lab_worker is not None and self.lab_worker.isRunning()
 
-    def encode(self):
+    def column_by_uid(self, uid):
+        return next((c for c in self.columns if c.uid == uid), None)
+
+    def is_up_to_date(self, column):
+        return self.encoded.get(column.uid) == (column.settings_key(), self.segment())
+
+    def part_changed(self):
+        """A different part makes every encoded variant out of date and moves the frame slider's range."""
+        self.frame_position = min(self.frame_position, max(0.0, self.segment()[1] - 1 / (self.source_fps or 25)))
+        self.sync_slider()
+        self.update_frame_label()
+        self.refresh_changed()
+
+    def refresh_changed(self):
+        """Marks variants whose settings or part differ from what was encoded; restores the result if changed back."""
         if self.encoding():
             return
-        self.variant_files.clear()
-        self.results.clear()
+        for column in self.columns:
+            if column.uid not in self.encoded:
+                continue
+            column.result.setText(self.result_text[column.uid] if self.is_up_to_date(column)
+                                  else tr("Changed – press “Encode” to update this variant."))
+
+    def encode(self):
+        """Encodes the variants that are new or changed; the others keep their result."""
+        if self.encoding():
+            return
+        pending = [c for c in self.columns if not self.is_up_to_date(c)]
+        if not pending:
+            self.status.setText(tr("Nothing to do: every variant is up to date."))
+            return
+        part = self.segment()
         self.finished_seconds = []
         self.running = None
-        for column in self.columns:
+        self.encoding_info = {}
+        for column in pending:
+            for table in (self.variant_files, self.results, self.result_text, self.encoded):
+                table.pop(column.uid, None)
             column.reset_result()
             column.result.setText(tr("Waiting…"))
-        for view in self.column_views:
-            view.clear_image()
+            self.column_views[self.columns.index(column)].clear_image()
+            self.encoding_info[column.uid] = (column.settings_key(), column.settings(), part)
+        self.to_encode = [c.uid for c in pending]
         self.btn_encode.setEnabled(False)
         self.btn_cancel.setEnabled(True)
         self.btn_add.setEnabled(False)
         for column in self.columns:
             column.remove_button.setEnabled(False)
-        self.status.setText(tr("Encoding the part of the video with each variant…"))
-        variants = [column.settings() for column in self.columns]
-        self.lab_worker = LabWorker(self.src, self.segment(), variants, self.tmpdir, self.fps, self)
+        self.status.setText(tr("Encoding {count} variants of the part of the video…", count=len(pending)))
+        jobs = [(c.uid, c.settings()) for c in pending]
+        self.lab_worker = LabWorker(self.src, part, jobs, self.tmpdir, self.fps, self)
         self.lab_worker.variant_started.connect(self.on_variant_started)
         self.lab_worker.variant_progress.connect(self.on_variant_progress)
         self.lab_worker.variant_done.connect(self.on_variant_done)
         self.lab_worker.variant_failed.connect(self.on_variant_failed)
         self.lab_worker.finished.connect(self.on_encoding_finished)
         self.lab_worker.start()
+        self.load_frames()   # the original at the new part
         self.show_estimate()
 
     def stop_encoding(self):
         if self.lab_worker is not None:
             self.lab_worker.stop()
-            for index, column in enumerate(self.columns):
-                if index not in self.results:
+            for column in self.columns:
+                if column.uid in self.to_encode and column.uid not in self.results:
                     column.result.setText(tr("Cancelled"))
             self.status.setText(tr("Cancelled."))
 
-    def on_variant_started(self, index):
-        self.columns[index].result.setText(tr("Encoding…"))
-        self.running = (index, time.monotonic(), 0.0)
+    def on_variant_started(self, uid):
+        column = self.column_by_uid(uid)
+        if column:
+            column.result.setText(tr("Encoding…"))
+        self.running = (uid, time.monotonic(), 0.0)
 
-    def on_variant_progress(self, index, percent):
-        self.columns[index].progress.setValue(percent)
-        if self.running and self.running[0] == index:
-            self.running = (index, self.running[1], percent / 100)
+    def on_variant_progress(self, uid, percent):
+        column = self.column_by_uid(uid)
+        if column:
+            column.progress.setValue(percent)
+        if self.running and self.running[0] == uid:
+            self.running = (uid, self.running[1], percent / 100)
         self.show_estimate()
 
-    def on_variant_done(self, index, path, size, seconds):
-        self.variant_files[index] = path
-        self.results[index] = (size, seconds)
+    def on_variant_done(self, uid, path, size, seconds):
+        column = self.column_by_uid(uid)
+        key, settings, part = self.encoding_info.get(uid, (None, None, None))
+        self.variant_files[uid] = path
+        self.results[uid] = (size, seconds)
         self.finished_seconds.append(seconds)
         self.running = None
-        self.columns[index].progress.setValue(100)
-        self.columns[index].result.setText(self.describe_result(size, seconds))
+        if settings is not None:
+            self.encoded[uid] = (key, part)
+            self.speeds.record(settings, 1, part[1], seconds)
+        if column:
+            column.progress.setValue(100)
+            self.result_text[uid] = self.describe_result(size, seconds, part[1])
+            column.result.setText(self.result_text[uid])
         self.load_frames()
         self.show_estimate()
 
-    def on_variant_failed(self, index, message):
+    def on_variant_failed(self, uid, message):
         self.running = None
-        self.columns[index].result.setText(tr("❌ Failed: {error}", error=message))
+        self.failed = getattr(self, "failed", set()) | {uid}
+        column = self.column_by_uid(uid)
+        if column:
+            column.result.setText(tr("❌ Failed: {error}", error=message))
         self.show_estimate()
 
     def on_encoding_finished(self):
@@ -629,8 +820,8 @@ class CompressionLabDialog(QDialog):
             self.status.setText(tr("Done. Drag a frame to move all views, or choose a zoom; “Use these settings” takes a variant over."))
 
     def remaining_seconds(self):
-        waiting = max(0, len(self.columns) - len(self.finished_seconds) - (1 if self.running else 0)
-                      - sum(1 for c in self.columns if c.result.text().startswith("❌")))
+        done = len(self.finished_seconds) + len(getattr(self, "failed", set()) & set(self.to_encode))
+        waiting = max(0, len(self.to_encode) - done - (1 if self.running else 0))
         if self.running:
             return estimate_remaining(self.finished_seconds, self.running[2], time.monotonic() - self.running[1], waiting)
         return estimate_remaining(self.finished_seconds, None, 0, waiting) if waiting else 0.0
@@ -643,15 +834,17 @@ class CompressionLabDialog(QDialog):
         self.estimate_label.setText(tr("about {seconds} s left", seconds=int(left + 0.5)) if left is not None
                                     else tr("estimating the time…"))
 
-    def describe_result(self, size, seconds):
-        _, length = self.segment()
-        total = estimate_total_size(size, length, self.duration)
+    def describe_result(self, size, seconds, part_length):
+        total = estimate_total_size(size, part_length, self.duration)
         text = tr("Part: {size} · encoded in {seconds:.0f} s", size=format_size(size), seconds=seconds)
         if total:
             original = self.src.stat().st_size if self.src.exists() else 0
             text += "\n" + tr("Whole video: about {size}", size=format_size(total))
             if original:
                 text += f" ({total / original * 100:.0f} %)"
+        if self.queue and self.queue[0] and self.queue[1] and part_length:
+            folder = seconds / part_length * self.queue[1]
+            text += "\n" + tr("All {count} videos: about {time}", count=self.queue[0], time=format_duration_long(folder))
         return text
 
     # ---------------------------------------------------------------------------------- result

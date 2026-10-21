@@ -6,7 +6,8 @@ import hashlib
 import time
 from pathlib import Path
 
-from video_helper_core.paths import duration_cache_file, thumbnail_dir
+from video_helper_core.i18n import tr
+from video_helper_core.paths import duration_cache_file, speed_cache_file, thumbnail_dir
 
 def format_size(size_bytes):
     is_negative = size_bytes < 0
@@ -442,3 +443,63 @@ class DurationCache:
             self.unsaved = 0
         except OSError:
             pass
+
+
+def format_duration_long(seconds):
+    minutes = max(1, round(seconds / 60))
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    if days:
+        return tr("{days} d {hours} h", days=days, hours=hours)
+    if hours:
+        return tr("{hours} h {minutes} min", hours=hours, minutes=minutes)
+    return tr("{minutes} min", minutes=minutes)
+
+
+class EncodeSpeeds:
+    """How long encoding takes for a given kind of settings, so the time of a whole folder can be estimated before it
+    starts. Stored per user (from real runs and from the compression lab) as: seconds of work per second of video."""
+
+    def __init__(self, path=None):
+        self.path = Path(path) if path else speed_cache_file()
+        try:
+            self.entries = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.entries = {}
+
+    @staticmethod
+    def key(settings, jobs):
+        cpu = settings.get('renderer') == "libx265"
+        return "|".join(str(part) for part in (
+            settings.get('renderer'), settings.get('preset') if cpu else "-",
+            settings.get('max_res') if settings.get('limit_res') else 0,
+            settings.get('max_fps') if settings.get('limit_fps') else 0, jobs))
+
+    def record(self, settings, jobs, video_seconds, wall_seconds):
+        """One finished encode: video_seconds of video took wall_seconds, with `jobs` encodes running side by side."""
+        if not video_seconds or wall_seconds <= 0:
+            return
+        ratio = wall_seconds / video_seconds
+        entry = self.entries.get(self.key(settings, jobs), {"ratio": ratio, "n": 0})
+        weight = min(entry["n"], 4)                       # recent measurements count more than old ones
+        self.entries[self.key(settings, jobs)] = {"ratio": (entry["ratio"] * weight + ratio) / (weight + 1), "n": entry["n"] + 1}
+        try:
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.entries), encoding="utf-8")
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def estimate(self, settings, jobs, video_seconds):
+        """(seconds, exact) for encoding video_seconds of video, or None if nothing is known for these settings.
+        exact: measured with the same number of parallel encodes. Otherwise the result is a cautious guess: a
+        measurement with other settings of parallelism counts as if the encodes ran one after the other."""
+        entry = self.entries.get(self.key(settings, jobs))
+        if entry:
+            return video_seconds * entry["ratio"] / jobs, True
+        prefix = self.key(settings, "").rstrip("|") + "|"
+        others = [(int(k.rsplit("|", 1)[1]), v) for k, v in self.entries.items() if k.startswith(prefix)]
+        if not others:
+            return None
+        known_jobs, entry = min(others, key=lambda item: item[0])
+        return video_seconds * entry["ratio"] / known_jobs, False
