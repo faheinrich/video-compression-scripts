@@ -21,10 +21,14 @@ class UnifiedScanWorker(QThread):
     file_found = Signal(dict)
     scan_finished = Signal(list)
     
-    def __init__(self, src_dir, dst_dir, flatten=False, sort_by="name_asc", postfix=DEFAULT_POSTFIX, excludes=()):
+    def __init__(self, src_dir, dst_dir, flatten=False, sort_by="name_asc", postfix=DEFAULT_POSTFIX, excludes=(),
+                 files=None):
+        """files: a hand-picked list of videos instead of everything below src_dir. Their results go to dst_dir, or
+        next to each original when dst_dir is empty."""
         super().__init__()
         self.src_dir = Path(src_dir)
-        self.dst_dir = Path(dst_dir)
+        self.dst_dir = Path(dst_dir) if dst_dir else None
+        self.files = None if files is None else [Path(f) for f in files]
         self.flatten = flatten
         self.postfix = postfix
         # Results of earlier runs lying in the source folder are never compressed again.
@@ -35,8 +39,11 @@ class UnifiedScanWorker(QThread):
     def run(self):
         try:
             # 1. Gather all source files
-            orig_files = [p for p in self.src_dir.rglob("*") if
-                          p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
+            if self.files is not None:
+                orig_files = [p for p in self.files if p.is_file()]
+            else:
+                orig_files = [p for p in self.src_dir.rglob("*") if
+                              p.is_file() and not p.name.startswith(".") and p.suffix.lower() in self.video_types]
 
             candidates = []
             for src_path in orig_files:
@@ -46,6 +53,8 @@ class UnifiedScanWorker(QThread):
                 candidates.append(src_path)
 
             def target_for(src_path, name):
+                if self.files is not None:
+                    return (self.dst_dir or src_path.parent) / name
                 rel_path = src_path.relative_to(self.src_dir)
                 return self.dst_dir / name if self.flatten else self.dst_dir / rel_path.with_name(name)
 
@@ -232,7 +241,9 @@ class ArchiveWorker(QThread):
 
                 if skip_reason:
                     count += 1
-                    self.status_update_path.emit(str(src_path), "skipped", skip_reason, skip_data)
+                    failed = bool(skip_data.get('failed'))
+                    self.ffmpeg_log_line_path.emit(str(src_path), log_msg)
+                    self.status_update_path.emit(str(src_path), "error" if failed else "skipped", skip_reason, skip_data)
                     self.progress_step.emit(count, log_msg)
                 elif p_ffmpeg:
                     if file_info.get('conflict'):
@@ -403,7 +414,8 @@ class ArchiveWorker(QThread):
             return p_ffmpeg, None, None, {}
         
         except Exception as e:
-            return None, tr("Start error"), tr("❌ Could not start {name}: {error}", name=src_path.name, error=e), {}
+            return (None, tr("Start error: {error}", error=e),
+                    tr("❌ Could not start {name}: {error}", name=src_path.name, error=e), {'failed': True})
     
     def finalize_video_process(self, p_ffmpeg, src_path, dst_path, replace_source=False):
         data_dict = {}
@@ -458,8 +470,7 @@ class ArchiveWorker(QThread):
             # Only keep the smaller original if it imports into Apple Photos; otherwise
             # the (always hvc1/AAC) compressed file stays the archive copy.
             if is_photos_compatible(src_path):
-                rel_path = src_path.relative_to(self.src_dir)
-                backup_path = dst_path.with_name(f"{rel_path.stem}_source{src_path.suffix}")
+                backup_path = dst_path.with_name(f"{src_path.stem}_source{src_path.suffix}")
                 shutil.copy2(src_path, backup_path)
                 result_msg += tr(" ⚠️ (original copied because it is smaller)")
             else:

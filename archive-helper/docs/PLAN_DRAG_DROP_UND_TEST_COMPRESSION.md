@@ -23,7 +23,9 @@ Entschieden und gebaut (die Beschreibung der Ausgangslage oben ist der Stand dav
 
 Noch offen aus diesem Abschnitt: Der Start-Dialog für „Überschreiben“ nennt noch keine Anzahl; Teildateien eines abgestürzten Laufs werden erst beim nächsten Start der betroffenen Datei aufgeräumt, nicht beim Programmstart.
 
-## B. Drag and Drop
+## B. Drag and Drop — umgesetzt
+
+Umgesetzt wie unten beschrieben; Abweichungen: Über der Liste ist die ganze Liste ein Quelle-Feld (außerhalb zwei große Hälften). Das Ziel akzeptiert auch eine Datei und nimmt dann deren Ordner. Mit Zielordner landen alle Ergebnisse dort, ohne Zielordner neben den Originalen. Das Postfix darf leer sein: Quelle = Ziel wird dann wie überall rot markiert und vor dem Start bestätigt.
 
 1. **Zwei große Ablagefelder:** Zieht man etwas über das Fenster, erscheint ein halbtransparentes Overlay mit zwei Hälften „Quelle“ und „Ziel“. Ein Ordner auf einer Hälfte setzt das jeweilige Feld.
 2. **Auf die Liste ziehen:**
@@ -54,8 +56,8 @@ Tests: Befehlsbau identisch zum normalen Lauf (gleiche Argumente bis auf `-ss/-t
 | Schritt | Inhalt | Aufwand (grob) |
 |---|---|---|
 | 1 | A: Schutz, rote Warnung, Teildatei, Dialog, Kollisionsnamen | erledigt |
-| 2 | B: Overlay + Ordner auf Liste | klein |
-| 3 | B: Dateimodus (Worker, Liste, Hinweisband) | mittel |
+| 2 | B: Overlay + Ordner auf Liste | erledigt |
+| 3 | B: Dateimodus (Worker, Liste, Hinweisband) | erledigt |
 | 4 | C: Fenster, Varianten, Größen, Vorschaubilder | mittel |
 | 5 | C: synchrones Abspielen und Zoom für N Varianten | mittel bis groß |
 

@@ -33,6 +33,33 @@ def clean_postfix(text):
     return re.sub(r'[\\/:\x00-\x1f]', "", text).strip()
 
 
+VIDEO_SUFFIXES = (".mov", ".mp4", ".avi", ".mts", ".ogv", ".m4v", ".mkv")
+
+
+def collect_videos(paths):
+    """Video files among dropped paths: files are taken as they are, folders are searched. Returns
+    (sorted unique videos, number of dropped files that are no videos)."""
+    videos, others = {}, 0
+    for path in map(Path, paths):
+        if path.is_dir():
+            for found in path.rglob("*"):
+                if found.is_file() and not found.name.startswith(".") and found.suffix.lower() in VIDEO_SUFFIXES:
+                    videos[path_key(found)] = found
+        elif path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES and not path.name.startswith("."):
+            videos[path_key(path)] = path
+        else:
+            others += 1
+    return sorted(videos.values(), key=lambda p: str(p).lower()), others
+
+
+def common_parent(paths):
+    """The deepest folder containing all the given files."""
+    paths = [Path(p) for p in paths]
+    if not paths:
+        return Path(".")
+    return Path(os.path.commonpath([str(p.parent) for p in paths]))
+
+
 def path_key(path):
     """Paths with the same key name the same file on a case-insensitive file system (macOS, Windows)."""
     return os.path.normcase(str(path)).lower()

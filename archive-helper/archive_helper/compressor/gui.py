@@ -23,10 +23,10 @@ from video_helper_core.dialogs import confirm_after_delay
 from video_helper_core.keep_awake import KeepAwake
 from video_helper_core.notify import notify
 from .utils import (
-    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, clear_caches, format_size, open_in_finder, parse_excludes,
+    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, clear_caches, collect_videos, common_parent, format_size, open_in_finder, parse_excludes,
     prune_thumbnails,
 )
-from .widgets import CompareVideoDialog, DropLineEdit
+from .widgets import CompareVideoDialog, DropLineEdit, DropOverlay, dropped_paths
 from .workers import ArchiveWorker, DurationProbeWorker, ResultSettingsWorker, ThumbnailRunnable, UnifiedScanWorker
 
 RENDERERS = ["libx265", "videotoolbox"]  # index = encoder combo index = saved renderer_index
@@ -159,6 +159,11 @@ class ArchiverGUI(QWidget):
         self.run_bytes = 0
         self.run_paths = set()
         self.rescan_pending = False
+        self.selection = None          # hand-picked videos (dropped files) instead of a source folder
+        self.folder_source_text = ""   # the source folder to return to
+        self.folder_target_text = ""   # and the target folder
+        self.skipped_drops = 0
+        self.setAcceptDrops(True)
 
         self.model = VideoTableModel(self)
         self.proxy = VideoFilterProxy(self)
@@ -225,6 +230,7 @@ class ArchiverGUI(QWidget):
         main.setSpacing(10)
         main.addLayout(self.build_header())
         main.addWidget(self.build_summary())
+        main.addWidget(self.build_selection_bar())
         main.addLayout(self.build_toolbar())
         main.addWidget(self.build_table(), stretch=1)
         self.detail_bar = QFrame(objectName="detailBar")
@@ -237,8 +243,105 @@ class ArchiverGUI(QWidget):
         self.drawer = self.build_drawer()
         root.addWidget(self.drawer)
 
+        self.drop_overlay = DropOverlay(self, self.drawer)
+        self.drop_overlay.dropped.connect(self.on_paths_dropped)
+        # The fields would take a drop themselves; all drops go through the overlay so Source/Target are clear.
+        self.txt_src.setAcceptDrops(False)
+        self.txt_dst.setAcceptDrops(False)
+
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self.start_unified_scan)
         self.set_run_mode(False)
+
+    # ---------------------------------------------------------- drag and drop, hand-picked videos
+    def build_selection_bar(self):
+        self.selection_bar = QFrame(objectName="detailBar")
+        layout = QHBoxLayout(self.selection_bar)
+        layout.setContentsMargins(12, 6, 12, 6)
+        self.selection_label = QLabel()
+        self.selection_label.setWordWrap(True)
+        back = QPushButton(tr("Back to folder mode"))
+        back.clicked.connect(lambda: self.leave_selection())
+        layout.addWidget(self.selection_label, 1)
+        layout.addWidget(back)
+        self.selection_bar.hide()
+        return self.selection_bar
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and not self.is_busy():
+            self.drop_overlay.describe(dropped_paths(event.mimeData()))
+            self.drop_overlay.setGeometry(self.rect())
+            self.drop_overlay.raise_()
+            self.drop_overlay.show()
+            event.acceptProposedAction()
+        else:
+            event.ignore()   # while compressing, the queue does not change
+
+    def on_paths_dropped(self, zone, paths):
+        if self.is_busy():
+            return
+        if zone == "target":
+            self.txt_dst.setText(str(paths[0] if paths[0].is_dir() else paths[0].parent))
+        elif len(paths) == 1 and paths[0].is_dir():
+            self.leave_selection(rescan=False)
+            changed = self.txt_src.text() != str(paths[0])
+            self.txt_src.setText(str(paths[0]))
+            if not changed:
+                self.schedule_scan()
+        else:
+            self.set_selection(paths)
+
+    def set_selection(self, paths):
+        videos, others = collect_videos(paths)
+        if not videos:
+            QMessageBox.information(self, tr("No videos"), tr("The dropped items contain no video files."))
+            return
+        if self.selection is None:
+            self.folder_source_text = self.txt_src.text()
+            self.folder_target_text = self.txt_dst.text()
+            # Videos from different folders: by default every result goes next to its original.
+            self.txt_dst.blockSignals(True)
+            self.txt_dst.setText("")
+            self.txt_dst.blockSignals(False)
+            self.txt_dst.setPlaceholderText(tr("Next to each original (or choose one folder)"))
+        self.selection, self.skipped_drops = videos, others
+        self.txt_src.blockSignals(True)
+        self.txt_src.setText(tr("{count} videos selected", count=len(videos)))
+        self.txt_src.blockSignals(False)
+        self.txt_src.setReadOnly(True)
+        self.txt_src.setToolTip("\n".join(p.name for p in videos[:30]) + ("\n…" if len(videos) > 30 else ""))
+        text = tr("Hand-picked videos: the results go next to the originals unless you choose a target folder.")
+        if others:
+            text += " " + tr("{count} dropped items were no videos and are ignored.", count=others)
+        self.selection_label.setText(text)
+        self.selection_bar.show()
+        self.update_run_enabled()
+        self.schedule_scan()
+
+    def leave_selection(self, rescan=True):
+        if self.selection is None:
+            return
+        self.selection = None
+        self.txt_src.setReadOnly(False)
+        self.selection_bar.hide()
+        self.txt_src.blockSignals(True)
+        self.txt_src.setText(self.folder_source_text)
+        self.txt_src.blockSignals(False)
+        self.txt_src.setToolTip(self.folder_source_text)
+        self.txt_dst.blockSignals(True)
+        self.txt_dst.setText(self.folder_target_text)
+        self.txt_dst.blockSignals(False)
+        self.txt_dst.setPlaceholderText(tr("Where the compressed videos go"))
+        if rescan:
+            self.schedule_scan()
+
+    def has_source(self):
+        return self.selection is not None or bool(self.txt_src.text().strip())
+
+    def has_target(self):
+        return self.selection is not None or bool(self.txt_dst.text().strip())   # none: next to the originals
+
+    def scan_root(self):
+        return common_parent(self.selection) if self.selection is not None else self.src_dir()
 
     def folder_field(self, label, placeholder):
         column = QVBoxLayout()
@@ -695,7 +798,7 @@ class ArchiverGUI(QWidget):
             return ""
         if self.is_scanning():
             return tr("The folders are still being scanned.")
-        if not self.txt_src.text().strip() or not self.txt_dst.text().strip():
+        if not self.has_source() or not self.has_target():
             return tr("Choose a source and a target folder first.")
         if not self.queue_items():
             if self.scan_items:
@@ -725,7 +828,7 @@ class ArchiverGUI(QWidget):
 
     def auto_scan(self):
         src = self.txt_src.text().strip()
-        if src and self.txt_dst.text().strip() and self.src_dir().is_dir():
+        if self.selection is not None or (src and self.txt_dst.text().strip() and self.src_dir().is_dir()):
             self.start_unified_scan()
         else:
             self.model.reset([])
@@ -748,9 +851,14 @@ class ArchiverGUI(QWidget):
         self.total_src_bytes = 0
         self.total_dst_bytes = 0
         self.run_paths = set()
-        self.scan_worker = UnifiedScanWorker(
-            self.src_dir(), self.dst_dir(), self.cb_flatten.isChecked(),
-            postfix=self.postfix(), excludes=parse_excludes(self.txt_excludes.text()))
+        if self.selection is not None:
+            self.scan_worker = UnifiedScanWorker(
+                self.scan_root(), self.dst_dir() if self.txt_dst.text().strip() else None, self.cb_flatten.isChecked(),
+                postfix=self.postfix(), excludes=parse_excludes(self.txt_excludes.text()), files=self.selection)
+        else:
+            self.scan_worker = UnifiedScanWorker(
+                self.src_dir(), self.dst_dir(), self.cb_flatten.isChecked(),
+                postfix=self.postfix(), excludes=parse_excludes(self.txt_excludes.text()))
         self.scan_worker.scan_finished.connect(self.on_unified_scan_finished)
         # The result arrives while the thread is still ending, so is_scanning() is still true in that handler.
         self.scan_worker.finished.connect(self.update_run_enabled)
@@ -760,7 +868,7 @@ class ArchiverGUI(QWidget):
 
     @Slot(list)
     def on_unified_scan_finished(self, items):
-        src_root = self.src_dir()
+        src_root = self.scan_root()
         rows = []
         for item in items:
             exists = item.get('exists_compressed')
@@ -838,6 +946,13 @@ class ArchiverGUI(QWidget):
     def start_archiving(self):
         if self.is_archiving() or not self.queue_items():
             return
+        if self.txt_dst.text().strip():
+            try:
+                self.dst_dir().mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                QMessageBox.critical(self, tr("Target folder not available"),
+                                     tr("The target folder cannot be used: {error}\n\nIs the drive connected?", error=e))
+                return
         replacing = [item for item in self.queue_items() if item.get('conflict')]
         if replacing and not confirm_after_delay(
                 self, tr("Source = target!"),
@@ -875,7 +990,8 @@ class ArchiverGUI(QWidget):
         self.run_bytes = sum(item['size'] for item in queue)
         self.run_started = time.monotonic()
 
-        self.worker = ArchiveWorker(self.src_dir(), self.dst_dir(), self.spin_jobs.value(), queue, settings)
+        self.worker = ArchiveWorker(self.scan_root(), self.dst_dir() if self.txt_dst.text().strip() else self.scan_root(),
+                                    self.spin_jobs.value(), queue, settings)
         self.worker.status_update_path.connect(self.on_status_update)
         self.worker.file_duration_discovered_path.connect(self.on_duration_found)
         self.worker.file_progress_path.connect(self.on_file_progress)
@@ -1023,7 +1139,10 @@ class ArchiverGUI(QWidget):
                              tone="good" if saved >= 0 else "warn",
                              tooltip=tr("Based on the videos already compressed (ratio {ratio:.0%}).", ratio=ratio))
 
-        target = nearest_existing(self.dst_dir()) if self.txt_dst.text().strip() else None
+        if self.selection is not None and not self.txt_dst.text().strip():
+            target = nearest_existing(self.scan_root())
+        else:
+            target = nearest_existing(self.dst_dir()) if self.txt_dst.text().strip() else None
         if target is None:
             self.set_summary("free", "–")
         else:
@@ -1052,7 +1171,7 @@ class ArchiverGUI(QWidget):
         self.progress_bar.setRange(0, 1000)
         if not rows:
             self.progress_bar.setValue(0)
-            if not self.txt_src.text().strip() or not self.txt_dst.text().strip():
+            if not self.has_source() or not self.has_target():
                 return tr("Choose a source and a target folder; the scan starts automatically.")
             return tr("No videos found in the source folder.")
 
@@ -1259,8 +1378,8 @@ class ArchiverGUI(QWidget):
     def save_defaults(self):
         res, fps = self.combo_res.currentData(), self.combo_fps.currentData()
         defaults = {
-            'src_dir': self.txt_src.text(),
-            'dst_dir': self.txt_dst.text(),
+            'src_dir': self.folder_source_text if self.selection is not None else self.txt_src.text(),
+            'dst_dir': self.folder_target_text if self.selection is not None else self.txt_dst.text(),
             'limit_res': res is not None,
             'max_res': str(res or 1920),
             'limit_fps': fps is not None,

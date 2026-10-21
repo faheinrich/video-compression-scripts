@@ -1,9 +1,11 @@
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QDialog, QSlider,
-    QGraphicsView, QGraphicsScene, QMessageBox, QSizePolicy, QStyle, QStyleOptionFrame
+    QGraphicsView, QGraphicsScene, QMessageBox, QSizePolicy, QStyle, QStyleOptionFrame, QWidget
 )
-from PySide6.QtCore import Qt, QPointF, QRectF, QUrl, QSizeF, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPainter, QPalette, QShortcut
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QUrl, QSizeF, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPalette, QPen, QShortcut
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QGraphicsVideoItem
 
@@ -67,6 +69,111 @@ class DropLineEdit(QLineEdit):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+
+def dropped_paths(mime):
+    """Local file and folder paths of a drag, in the order they were dragged."""
+    return [Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()]
+
+
+class DropOverlay(QWidget):
+    """Covers the page while files are dragged over it, in two areas that never overlap: Source (the list and
+    everything left of the settings) and Target (the settings column on the right). dropped(zone, paths) reports a drop."""
+
+    dropped = Signal(str, list)
+
+    def __init__(self, parent, target_widget):
+        super().__init__(parent)
+        self.target_widget = target_widget   # the settings drawer: its column is the Target area
+        self.setAcceptDrops(True)
+        self.hover = None
+        self.dragged = []
+        self.pointer = QPoint(-1, -1)
+        self.hide()
+
+    def zones(self, pos=None):
+        """Name -> rectangle of the two areas. The Target area is the settings column; without it the right 30 %."""
+        area = QRectF(self.rect()).adjusted(10, 10, -10, -10)
+        if self.target_widget.isVisible():
+            split = self.target_widget.mapTo(self.parentWidget(), self.target_widget.rect().topLeft()).x()
+        else:
+            split = area.left() + area.width() * 0.7
+        return {"source": QRectF(area.left(), area.top(), split - area.left() - 6, area.height()),
+                "target": QRectF(split + 6, area.top(), area.right() - split - 6, area.height())}
+
+    def describe(self, paths):
+        """What is being dragged: remembered so the areas can say what a drop would do."""
+        self.dragged = list(paths)
+
+    def source_hint(self):
+        paths = self.dragged
+        if not paths:
+            return tr("Drop a folder or video files")
+        if len(paths) == 1 and paths[0].is_dir():
+            return tr("Use this folder as the source")
+        return tr("Pick {count} dropped items as the videos to compress", count=len(paths))
+
+    def target_hint(self):
+        paths = self.dragged
+        if not paths:
+            return tr("Drop the folder for the results")
+        if len(paths) == 1 and paths[0].is_dir():
+            return tr("Use this folder for the results")
+        return tr("Use the folder of the first item for the results")
+
+    def zone_at(self, pos):
+        return next((name for name, rect in self.zones(pos).items() if rect.contains(QPointF(pos))), None)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 90))
+        titles = {"source": (tr("Source"), self.source_hint()), "target": (tr("Target"), self.target_hint())}
+        for name, rect in self.zones(self.pointer).items():
+            hot = name == self.hover
+            fill = QColor(58, 99, 216, 235 if hot else 170)
+            painter.setPen(QPen(QColor(255, 255, 255, 230), 3, Qt.DashLine))
+            painter.setBrush(fill)
+            painter.drawRoundedRect(rect, 18, 18)
+            painter.setPen(QColor("white"))
+            title, hint = titles[name]
+            font = QFont(self.font())
+            font.setPointSizeF(font.pointSizeF() * 2.2)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(rect.adjusted(0, -20, 0, 0), int(Qt.AlignCenter), title)
+            painter.setFont(self.font())
+            painter.drawText(rect.adjusted(0, 50, 0, 0), int(Qt.AlignHCenter | Qt.AlignVCenter), hint)
+
+    def track(self, pos):
+        self.pointer = pos
+        self.hover = self.zone_at(pos)
+        self.update()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            self.describe(dropped_paths(event.mimeData()))
+            event.acceptProposedAction()
+            self.track(event.position().toPoint())
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        event.acceptProposedAction()
+        self.track(event.position().toPoint())
+
+    def dragLeaveEvent(self, event):
+        self.hover = None
+        self.hide()
+
+    def dropEvent(self, event):
+        zone = self.zone_at(event.position().toPoint())
+        paths = dropped_paths(event.mimeData())
+        self.hover = None
+        self.hide()
+        event.acceptProposedAction()
+        if zone and paths:
+            self.dropped.emit(zone, paths)
 
 
 class ZoomableVideoView(QGraphicsView):

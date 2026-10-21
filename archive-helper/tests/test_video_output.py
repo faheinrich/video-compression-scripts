@@ -299,13 +299,15 @@ def test_encoder_runs_with_lower_priority_when_asked(qapp, tmp_path, low_priorit
 
     src = tmp_path / "src"
     src.mkdir()
-    clip = make_clip(src / "a.mp4", size="1280x720", seconds=4)
-    worker = ArchiveWorker(src, tmp_path / "dst", 1, [], {**BASE_SETTINGS, "low_priority": low_priority})
+    clip = make_clip(src / "a.mp4", size="1280x720", seconds=8)
+    # a slow preset keeps ffmpeg running long enough to look at it, even on a busy machine
+    worker = ArchiveWorker(src, tmp_path / "dst", 1, [], {**BASE_SETTINGS, "low_priority": low_priority, "preset": "veryslow"})
     duration, fps, audio = get_video_info(clip)
     proc, error, message, _ = worker.start_video_process(clip, tmp_path / "dst" / "a_archived.mp4", duration, fps, audio)
     assert proc is not None, f"{error}: {message}"
     nice = int(subprocess.run(["ps", "-o", "nice=", "-p", str(proc.pid)], capture_output=True, text=True).stdout.strip() or "-99")
-    proc.communicate(timeout=120)
+    proc.kill()
+    proc.communicate(timeout=30)
     assert nice == expected
 
 
@@ -386,3 +388,16 @@ def test_aborting_a_run_removes_only_the_unfinished_file(qapp, tmp_path):
     worker.kill_all_processes()
     proc.wait(timeout=30)
     assert dst.read_bytes() == b"earlier result" and not partial_path(dst).exists()
+
+
+def test_a_video_that_cannot_be_started_is_an_error_with_the_reason_not_a_skip(qapp, tmp_path, monkeypatch):
+    from archive_helper.compressor import workers
+    from archive_helper.compressor.workers import ArchiveWorker
+
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"x")
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file")
+    worker = ArchiveWorker(tmp_path, tmp_path, 1, [], dict(BASE_SETTINGS))
+    proc, reason, message, data = worker.start_video_process(src, blocker / "sub" / "a_archived.mp4", None, None, None)
+    assert proc is None and reason.startswith("Startfehler") and data == {"failed": True} and "a.mp4" in message

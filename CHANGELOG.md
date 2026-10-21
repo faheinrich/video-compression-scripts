@@ -30,7 +30,12 @@ All notable changes to the two apps and the shared core. The format follows
 - Changed: when two sources would get the same target name (`test.mov` and `test.mp4`), both keep their extension in
   the name (`test.mov_archived.mp4`, `test.mp4_archived.mp4`).
 - "Keep computer awake" is off by default.
-- Planned: drag and drop and "Inspect different compressions" (see `docs/PLAN_DRAG_DROP_UND_TEST_COMPRESSION.md`).
+- New: **drag and drop.** Dragging files over the window shows two big areas, Source and Target. A folder on Source sets the
+  source folder; video files (or several folders) on Source become a hand-picked list ("Back to folder mode" returns); a
+  folder on Target sets the target. Over the list, the whole list is the Source area. Hand-picked videos get their
+  results next to the originals unless a target folder is set, with the same name rules and the same source = target
+  warning. Nothing can be dropped while a run is going.
+- Planned: "Inspect different compressions" (see `docs/PLAN_DRAG_DROP_UND_TEST_COMPRESSION.md`).
 - Fixed: on macOS the native window title was drawn over the back button in the title bar and probably swallowed
   clicks on it. The native title is left empty there.
 - Fixed: the quality hint under the Small / Archive / High buttons changed its length and moved the controls below it
@@ -40,6 +45,7 @@ All notable changes to the two apps and the shared core. The format follows
 - Fixed: the same title bar problem as in Archive Helper (shared window shell).
 
 ### Development
+- Tests no longer play audio: the audio output is silent but still reports the volume and mute state that the code sets.
 - Tests no longer run again for release tags; every test has a 300 s timeout and every CI job a 25 minute limit,
   after a test hung once on Linux.
 - Added this changelog; removed the outdated roadmap.

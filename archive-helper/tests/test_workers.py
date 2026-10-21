@@ -351,3 +351,26 @@ def test_result_settings_worker_reports_stored_settings(qapp, tmp_path):
     worker.run()
     assert seen == [(str(tmp_path / "s1.mp4"), {"version": 1, "crf": 22})] or \
         (len(seen) == 1 and seen[0][1]["crf"] == 22)
+
+
+def test_run_marks_a_video_that_cannot_be_started_as_error_with_the_reason(qapp, tmp_path):
+    src = tmp_path / "src"
+    touch(src / "a.mp4", 10)
+    blocker = touch(tmp_path / "blocker", 1)          # a file where the target folder would have to be
+    dst = blocker / "target"
+    worker = archive_worker(src, dst, [item(src, dst, "a.mp4")])
+    worker.run()
+    status = [s for s in worker.events["status"] if s[0] == str(src / "a.mp4")]
+    assert [s[1] for s in status] == ["error"] and status[0][2].startswith("Startfehler")
+    assert any("Could not start" in line[1] or "Konnte" in line[1] or "❌" in line[1] for line in worker.events["log"])
+
+
+def test_scan_of_a_hand_picked_list_ignores_other_files_in_the_folders(qapp, tmp_path):
+    from archive_helper.compressor.workers import UnifiedScanWorker
+
+    src = tmp_path / "src"
+    a, b = touch(src / "a.mp4"), touch(src / "b.mov")
+    worker = UnifiedScanWorker(src, None, files=[a])
+    found = collect(worker.file_found)
+    worker.run()
+    assert [i["path"].name for i in found] == ["a.mp4"] and found[0]["dst_path"] == src / "a_archived.mp4"

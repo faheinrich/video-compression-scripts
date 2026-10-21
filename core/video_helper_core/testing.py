@@ -30,6 +30,40 @@ def no_update_check(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def silent_audio(monkeypatch):
+    """Tests play real videos; keep them quiet. The real output stays at volume 0 while volume() and isMuted() still
+    report what the code under test set, so the volume and mute logic can be tested."""
+    import sys
+
+    from PySide6 import QtMultimedia
+
+    class SilentAudioOutput(QtMultimedia.QAudioOutput):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._volume, self._muted = 1.0, False
+            super().setVolume(0.0)
+            super().setMuted(True)
+
+        def setVolume(self, volume):
+            self._volume = volume
+
+        def volume(self):
+            return self._volume
+
+        def setMuted(self, muted):
+            self._muted = muted
+
+        def isMuted(self):
+            return self._muted
+
+    monkeypatch.setattr(QtMultimedia, "QAudioOutput", SilentAudioOutput)
+    for module in list(sys.modules.values()):   # modules that imported the class by name before this test
+        # vars(), not getattr(): lazy modules (transformers) would import half the world on any attribute lookup
+        if vars(module).get("QAudioOutput") is QtMultimedia.QAudioOutput.__mro__[1]:
+            monkeypatch.setattr(module, "QAudioOutput", SilentAudioOutput)
+
+
+@pytest.fixture(autouse=True)
 def reset_language():
     from video_helper_core import i18n
 
