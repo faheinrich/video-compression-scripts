@@ -9,7 +9,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        include:
+        package: [video-helper-core, archive-helper, analysis-helper]
+        include:   # adds the folder to the combinations of the same package
           - {package: video-helper-core, dir: core}
           - {package: archive-helper, dir: archive-helper}
           - {package: analysis-helper, dir: analysis-helper}
