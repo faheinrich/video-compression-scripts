@@ -18,6 +18,7 @@ SPEC = AppSpec(
         Tool("rsync", lambda: tr("Backup (rsync)"), "tool-backup.png", RsyncSyncGUI),
     ],
     resources=resource_dir(APP_ROOT),
+    tag_prefix="archive-v",
     busy_message=lambda: tr("Please stop running jobs first (compression or rsync), then change the language."),
 )
 

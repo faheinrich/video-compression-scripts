@@ -6,6 +6,8 @@ from PySide6.QtCore import QEvent, QPointF, Qt
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QMessageBox
 
+from video_helper_core.shell import REPO_URL
+
 from archive_helper import __version__, app
 
 
@@ -52,7 +54,7 @@ def test_about_dialog_names_the_app_and_version(qapp, monkeypatch):
     monkeypatch.setattr(QMessageBox, "setText", lambda self, text: texts.append(text))
     window = app.ArchiveHelperWindow()
     window.show_about()
-    assert any("Archive Helper" in t and __version__ in t for t in texts)
+    assert any("Archive Helper" in t and __version__ in t and REPO_URL in t for t in texts)
     window.close()
 
 
@@ -114,4 +116,45 @@ def test_language_change_is_refused_while_a_job_runs(qapp, monkeypatch):
     combo.setCurrentIndex(combo.findData("en"))
     assert shown and combo.currentData() == "de"
     monkeypatch.undo()   # a busy tool would make close() ask whether to quit
+    window.close()
+
+
+def test_landing_page_shows_the_version_and_announces_a_newer_release(qapp, monkeypatch):
+    from video_helper_core import updates
+
+    window = app.ArchiveHelperWindow()
+    window.show()
+    qapp.processEvents()
+    landing = window.landing_page
+    assert landing.version_label.text() == f"v{__version__}" and landing.version_label.isVisible()
+    assert landing.update_label.isHidden()
+
+    window.update_checker.found.emit("9.9.9", "https://example/release")
+    assert not landing.update_label.isHidden()
+    assert "v9.9.9" in landing.update_label.text() and "https://example/release" in landing.update_label.text()
+    assert "d9730d" in landing.update_label.styleSheet()
+
+    # the announcement survives a language switch (the landing page is rebuilt)
+    window.landing_page.lang_combo.setCurrentIndex(window.landing_page.lang_combo.findData("en"))
+    qapp.processEvents()
+    assert "New version v9.9.9 available" in window.landing_page.update_label.text()
+    window.close()
+
+
+def test_the_check_looks_for_this_apps_tags(qapp, monkeypatch):
+    window = app.ArchiveHelperWindow()
+    assert (window.update_checker.tag_prefix, window.update_checker.current_version) == (app.SPEC.tag_prefix, __version__)
+    assert app.SPEC.tag_prefix.endswith("-v") and app.SPEC.tag_prefix.startswith("archive")
+    window.close()
+
+
+def test_tool_icons_and_names_share_one_centre_line(qapp):
+    window = app.ArchiveHelperWindow()
+    window.resize(900, 600)
+    window.show()
+    qapp.processEvents()
+    for tool in app.SPEC.tools:
+        button = window.landing_page.findChild(type(window.landing_page.about_btn), f"open_{tool.key}")
+        label = button.parentWidget().findChildren(type(window.landing_page.version_label))[0]
+        assert abs(button.geometry().center().x() - label.geometry().center().x()) <= 1
     window.close()

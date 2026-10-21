@@ -51,7 +51,7 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            label: macOS-arm64
+            label: macOS-silicon
           - os: ubuntu-latest
             label: Linux-x64
           - os: windows-latest
@@ -117,7 +117,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TITLE: ${{ needs.meta.outputs.title }}
         run: |
-          notes="Unsigned builds. macOS: right-click the app, choose Open on first start. Windows: SmartScreen shows a warning, choose More info, Run anyway."
+          notes="Unsigned builds. macOS: Apple Silicon (M1 or later) only; on first start macOS blocks the app: open System Settings > Privacy & Security and choose Open Anyway (right-click > Open no longer works on macOS 15 and later). Windows: SmartScreen shows a warning, choose More info, Run anyway."
           if [[ "${{ needs.meta.outputs.app }}" == "archive-helper" ]]; then
             notes="$notes Requires ffmpeg and exiftool (macOS: brew install ffmpeg exiftool)."
           else

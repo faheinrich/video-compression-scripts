@@ -19,8 +19,11 @@ from PySide6.QtWidgets import (
 
 from video_helper_core.i18n import DEFAULT_LANGUAGE, LANGUAGES, current_language, set_language, tr
 from video_helper_core.paths import settings_file
+from video_helper_core.updates import UpdateChecker
 
 MAC_TITLE_BAR = sys.platform == "darwin"
+REPO_URL = "https://github.com/faheinrich/video-helper-tools"
+UPDATE_COLOR = "#d9730d"   # orange, same family as the warning colour of the lists
 
 
 def resource_dir(app_root):
@@ -43,6 +46,7 @@ class AppSpec:
     about: Callable[[str], str]       # version -> HTML text of the About dialog
     tools: list = field(default_factory=list)
     resources: Path = Path("resources")
+    tag_prefix: str = ""              # e.g. "archive-v": releases with this tag prefix are checked for updates
     busy_message: Callable[[], str] = lambda: tr("Please stop running jobs first, then change the language.")
 
 
@@ -166,6 +170,23 @@ class LandingPage(QWidget):
         layout.addLayout(btn_row)
         layout.addStretch()
 
+        bottom = QHBoxLayout()
+        self.version_label = QLabel(f"v{self.spec.version}")
+        self.version_label.setStyleSheet("color: #888;")
+        self.update_label = QLabel()
+        self.update_label.setOpenExternalLinks(True)
+        self.update_label.setStyleSheet(f"color: {UPDATE_COLOR}; font-weight: 600;")
+        self.update_label.hide()
+        bottom.addWidget(self.version_label)
+        bottom.addWidget(self.update_label)
+        bottom.addStretch()
+        layout.addLayout(bottom)
+
+    def show_update(self, version, url):
+        self.update_label.setText(f'<a href="{url}" style="color: {UPDATE_COLOR}; text-decoration: none;">'
+                                  + tr("New version v{version} available", version=version) + "</a>")
+        self.update_label.show()
+
     def tool_button(self, tool):
         container = QWidget()
         vbox = QVBoxLayout(container)
@@ -190,8 +211,9 @@ class LandingPage(QWidget):
         lbl.setAlignment(Qt.AlignCenter)
         lbl.setStyleSheet("font-size: 16px; font-weight: bold;")
 
-        vbox.addWidget(btn)
-        vbox.addWidget(lbl)
+        # Both centred on the same axis: the label is often wider than the 140 px button.
+        vbox.addWidget(btn, 0, Qt.AlignHCenter)
+        vbox.addWidget(lbl, 0, Qt.AlignHCenter)
         return container
 
 
@@ -236,7 +258,16 @@ class SuiteWindow(QMainWindow):
         self.layout.setContentsMargins(0, 0, 0, 0)  # pages bring their own margins
         self.tools = {}  # key -> tool widget
         self.landing_page = None
+        self.update_release = None   # (version, url) once the update check found a newer release
         self.build_landing_page()
+        if spec.tag_prefix:
+            self.update_checker = UpdateChecker(spec.tag_prefix, spec.version, self)
+            self.update_checker.found.connect(self.on_update_found)
+            self.update_checker.start()
+
+    def on_update_found(self, version, url):
+        self.update_release = (version, url)
+        self.landing_page.show_update(version, url)
 
     def build_toolbar(self):
         self.back_action = QAction(self)
@@ -262,6 +293,8 @@ class SuiteWindow(QMainWindow):
 
     def build_landing_page(self):
         self.landing_page = LandingPage(self.spec, self.show_tool)
+        if self.update_release:
+            self.landing_page.show_update(*self.update_release)
         self.landing_page.about_btn.clicked.connect(self.show_about)
         self.landing_page.lang_combo.currentIndexChanged.connect(self.change_language)
         self.show_landing()
@@ -293,7 +326,9 @@ class SuiteWindow(QMainWindow):
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Information)
         msg.setWindowTitle(tr("About {name}", name=self.spec.name))
-        msg.setText(self.spec.about(self.spec.version))
+        msg.setTextFormat(Qt.RichText)
+        msg.setTextInteractionFlags(Qt.TextBrowserInteraction)  # makes the link clickable
+        msg.setText(f'{self.spec.about(self.spec.version)}<p><a href="{REPO_URL}">{REPO_URL.removeprefix("https://")}</a></p>')
         msg.exec()
 
     def change_language(self, index):

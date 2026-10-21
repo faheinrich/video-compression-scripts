@@ -6,6 +6,15 @@ All notable changes to the two apps and the shared core. The format follows
 
 ## [Unreleased]
 
+### Both apps
+- The overview page shows the version at the bottom left. At start the app asks GitHub once (in the background, no
+  other data is sent) whether a newer release of the app exists and then shows "New version vX.Y.Z available" in
+  orange next to it, linking to the release. Set `VIDEO_HELPER_TOOLS_NO_UPDATE_CHECK=1` to switch the check off.
+- The About dialog links to the repository.
+- Fixed: the tool names on the overview page are centred below their icons (a wide name pushed the icon aside).
+- macOS packages are named `...-macOS-silicon.zip` (Apple Silicon only); the release notes now describe how to open
+  an unsigned app on macOS 15 and later (System Settings > Privacy & Security > Open Anyway).
+
 ### Archive Helper
 - Fixed: on macOS the native window title was drawn over the back button in the title bar and probably swallowed
   clicks on it. The native title is left empty there.

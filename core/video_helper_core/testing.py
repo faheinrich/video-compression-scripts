@@ -22,6 +22,14 @@ def isolated_app_data(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_update_check(monkeypatch):
+    # The apps ask GitHub for new releases at start; tests must not use the network.
+    from video_helper_core.updates import DISABLE_ENV
+
+    monkeypatch.setenv(DISABLE_ENV, "1")
+
+
+@pytest.fixture(autouse=True)
 def reset_language():
     from video_helper_core import i18n
 

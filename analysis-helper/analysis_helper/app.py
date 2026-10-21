@@ -20,6 +20,7 @@ SPEC = AppSpec(
         Tool("transcriber", lambda: tr("Transcribe Audio"), "tool-transcribe.png", WhisperGui),
     ],
     resources=resource_dir(APP_ROOT),
+    tag_prefix="analysis-v",
     busy_message=lambda: tr("Please stop running jobs first (transcription or the local Whisper server), then change the language."),
 )
 
