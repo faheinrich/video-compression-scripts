@@ -38,7 +38,9 @@ Umgesetzt wie unten beschrieben; Abweichungen: Über der Liste ist die ganze Lis
 
 Tests: Drop eines Ordners / mehrerer Dateien / gemischt, Overlay erscheint und verschwindet, Postfix-Pflicht bei Quelle = Ziel, Rückkehr in den Ordnermodus, Ablehnung während eines Laufs, Einstellungen werden nicht mit dem Dateimodus verwechselt (`save_defaults` speichert nur Ordner).
 
-## C. „Test Compression“
+## C. „Test Compression“ — erster Entwurf umgesetzt (`compressor/lab.py`)
+
+Stand: Fenster mit Ausschnitt, drei Varianten, Größen und Hochrechnung, Einzelbilder nebeneinander mit Einpassen/100 %/200 % und gemeinsamem Verschieben, „Diese Einstellungen verwenden“. Seitdem ergänzt: Fortschritt und Zeitschätzung, „Alle abbrechen“, bis zu acht Varianten per „+ Variante“ (horizontal scrollbar), freie Wahl von Start und Länge (Standard: die ersten 10 s), HDR-Standbilder mit BT.2020-Matrix, HDR-Testvideo mit Farbverläufen. Offen: Abspielen der Varianten, echtes Tone Mapping für HDR-Standbilder (dieses ffmpeg hat kein `zscale`).
 
 Ein Knopf **„Inspect different compressions“ neben „Process next“** in der Leiste der markierten Zeile öffnet ein eigenes Fenster für dieses Video.
 

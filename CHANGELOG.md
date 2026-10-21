@@ -7,8 +7,17 @@ All notable changes to the two apps and the shared core. The format follows
 ## [Unreleased]
 
 ### Archive Helper
-- Planned for 0.0.3: "Inspect different compressions" (several compression settings of one video side by side, with
-  file sizes and 100 % / 200 % zoom; see `archive-helper/docs/PLAN_DRAG_DROP_UND_TEST_COMPRESSION.md`).
+- New: **Inspect different compressions.** A button next to "Process next" (and an entry in the row menu) opens the
+  compression lab for the selected video. Several variants (three at first, starting with Small, Archive and High quality
+  and the drawer's other settings; "+ Variant" adds up to eight, the view scrolls sideways) are encoded for a part of the
+  video: the first 10 seconds by default, any start and length can be chosen. Each variant has its own progress bar, the
+  time left is estimated, and "Cancel all" stops everything. Every variant shows the size of the part, the estimated size
+  of the whole video and the encoding time. One frame of the original and of every variant is shown side by side, fitted
+  or at 100 % / 200 %, and dragging one moves all views. HDR (HLG) frames are decoded with the BT.2020 matrix; there is no
+  tone mapping, so they look a little flat. "Use these settings" puts a variant into the drawer. Not yet: playback.
+- New sample for tests and for trying it out: `archive-helper/example_resources/hdr-gradient-hlg.mov` (HLG, BT.2020,
+  10 bit, moving colour gradients and grey ramps where banding shows first; `tests/hdr_samples.py` builds it).
+- Internal: the ffmpeg call is built by `ArchiveWorker.build_ffmpeg_command`, used by the real run and the lab alike.
 
 ## [0.0.2] - 2026-10-21
 

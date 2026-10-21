@@ -307,6 +307,71 @@ class ArchiveWorker(QThread):
             self.kill_all_processes()
         self.finished_all.emit()
     
+    def build_ffmpeg_command(self, src_path, out_path, src_fps, segment=None):
+        """The ffmpeg call for one video with this worker's settings. segment=(start, length) in seconds encodes just
+        that part (used to try settings out). Also remembers HDR sources for the settings record."""
+        filters = []
+        if self.settings['limit_res']:
+            max_res = self.settings['max_res']
+            filters.append(
+                f"scale='if(gt(iw,ih),min({max_res},iw),-2)':'if(gt(iw,ih),-2,min({max_res},ih))':force_original_aspect_ratio=decrease,"
+                f"scale=trunc(iw/2)*2:trunc(ih/2)*2"
+            )
+        if self.settings['limit_fps'] and src_fps and src_fps > self.settings['max_fps']:
+            filters.append(f"fps=fps={self.settings['max_fps']}")
+
+        # HDR stays HDR: 10-bit HEVC (Main 10) with the source's colour tags. SDR stays 8-bit.
+        hdr = get_hdr_color(src_path)
+        libx265 = self.settings['renderer'] == "libx265"
+        if hdr:
+            self.hdr_sources.add(str(src_path))
+            filters.append("format=yuv420p10le" if libx265 else "format=p010le")
+        else:
+            filters.append("format=yuv420p")
+        vf_chain = ",".join(filters)
+
+        # Keep EVERY audio stream: without -map ffmpeg takes only one, which loses the other tracks of recordings with
+        # separate tracks (e.g. game sound and voice). "V" skips cover art, "a?" does not fail without audio.
+        audio_streams = get_audio_streams(src_path)
+        ffmpeg_cmd = ["ffmpeg", "-y"]
+        if segment:
+            ffmpeg_cmd += ["-ss", str(segment[0])]   # before -i: jumps to the start instead of decoding up to it
+        ffmpeg_cmd += ["-i", str(src_path), "-vf", vf_chain, "-map", "0:V:0", "-map", "0:a?"]
+        # re-muxing drops the stream names of the recorder; write them back as handler name and title
+        for idx, (_codec, stream_name) in enumerate(audio_streams):
+            if stream_name:
+                ffmpeg_cmd += [f"-metadata:s:a:{idx}", f"handler_name={stream_name}",
+                               f"-metadata:s:a:{idx}", f"title={stream_name}"]
+        if hdr:
+            ffmpeg_cmd += ["-color_primaries", hdr["color_primaries"], "-color_trc", hdr["color_trc"],
+                           "-colorspace", hdr["colorspace"], "-profile:v", "main10"]
+
+        if segment:
+            ffmpeg_cmd += ["-t", str(segment[1])]
+        elif self.settings.get('dry_run', False):
+            ffmpeg_cmd += ["-t", "1"]
+
+        if self.settings['copy_aac'] and audio_streams and all(c == "aac" for c, _ in audio_streams):
+            ffmpeg_cmd += ["-c:a", "copy"]
+        else:
+            ffmpeg_cmd += ["-c:a", "aac", "-b:a", "128k"]
+
+        if libx265:
+            ffmpeg_cmd += [
+                "-c:v", "libx265",
+                "-crf", str(self.settings['crf']),
+                "-preset", self.settings['preset'],
+                "-tag:v", "hvc1"
+            ]
+        else:
+            ffmpeg_cmd += [
+                "-c:v", "hevc_videotoolbox",
+                "-q:v", str(self.settings['vt_quality']),
+                "-tag:v", "hvc1"
+            ]
+        ffmpeg_cmd.append(str(out_path))
+        return ffmpeg_cmd
+
     def start_video_process(self, src_path, dst_path, src_dur, src_fps, src_audio, replace_source=False):
         try:
             # replace_source: the target is the source itself (confirmed by the user), so there is no earlier result to keep.
@@ -330,65 +395,9 @@ class ArchiveWorker(QThread):
             partial = partial_path(dst_path)
             partial.unlink(missing_ok=True)   # left over from a crashed run
             
-            filters = []
-            if self.settings['limit_res']:
-                max_res = self.settings['max_res']
-                filters.append(
-                    f"scale='if(gt(iw,ih),min({max_res},iw),-2)':'if(gt(iw,ih),-2,min({max_res},ih))':force_original_aspect_ratio=decrease,"
-                    f"scale=trunc(iw/2)*2:trunc(ih/2)*2"
-                )
-            if self.settings['limit_fps'] and src_fps and src_fps > self.settings['max_fps']:
-                filters.append(f"fps=fps={self.settings['max_fps']}")
-            
-            # HDR stays HDR: 10-bit HEVC (Main 10) with the source's colour tags. SDR stays 8-bit.
-            hdr = get_hdr_color(src_path)
-            libx265 = self.settings['renderer'] == "libx265"
-            if hdr:
-                self.hdr_sources.add(str(src_path))
-                filters.append("format=yuv420p10le" if libx265 else "format=p010le")
-            else:
-                filters.append("format=yuv420p")
-            vf_chain = ",".join(filters)
-
-            # Keep EVERY audio stream: without -map ffmpeg takes only one, which loses the other tracks of recordings with
-            # separate tracks (e.g. game sound and voice). "V" skips cover art, "a?" does not fail without audio.
-            audio_streams = get_audio_streams(src_path)
-            ffmpeg_cmd = ["ffmpeg", "-y", "-i", str(src_path), "-vf", vf_chain,
-                          "-map", "0:V:0", "-map", "0:a?"]
-            # re-muxing drops the stream names of the recorder; write them back as handler name and title
-            for idx, (_codec, stream_name) in enumerate(audio_streams):
-                if stream_name:
-                    ffmpeg_cmd += [f"-metadata:s:a:{idx}", f"handler_name={stream_name}",
-                                   f"-metadata:s:a:{idx}", f"title={stream_name}"]
-            if hdr:
-                ffmpeg_cmd += ["-color_primaries", hdr["color_primaries"], "-color_trc", hdr["color_trc"],
-                               "-colorspace", hdr["colorspace"], "-profile:v", "main10"]
-            
-            if self.settings.get('dry_run', False):
-                ffmpeg_cmd += ["-t", "1"]
-            
-            if self.settings['copy_aac'] and audio_streams and all(c == "aac" for c, _ in audio_streams):
-                ffmpeg_cmd += ["-c:a", "copy"]
-            else:
-                ffmpeg_cmd += ["-c:a", "aac", "-b:a", "128k"]
-            
-            if libx265:
-                ffmpeg_cmd += [
-                    "-c:v", "libx265",
-                    "-crf", str(self.settings['crf']),
-                    "-preset", self.settings['preset'],
-                    "-tag:v", "hvc1"
-                ]
-            else:
-                ffmpeg_cmd += [
-                    "-c:v", "hevc_videotoolbox",
-                    "-q:v", str(self.settings['vt_quality']),
-                    "-tag:v", "hvc1"
-                ]
-            
             # The result is written next to its final name and only renamed when complete: an aborted or failed run
             # never destroys an existing file (and a replaced original stays intact until the new file is ready).
-            ffmpeg_cmd.append(str(partial))
+            ffmpeg_cmd = self.build_ffmpeg_command(src_path, partial, src_fps)
             
             env = os.environ.copy()
             env["FFREPORT"] = f"file={os.devnull}:level=32"

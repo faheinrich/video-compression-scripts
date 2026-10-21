@@ -26,15 +26,11 @@ from .utils import (
     DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, clear_caches, collect_videos, common_parent, format_size, open_in_finder, parse_excludes,
     prune_thumbnails,
 )
+from .lab import CompressionLabDialog
+from .options import FRAME_RATES, QUALITY_PRESETS, RENDERERS, RESOLUTIONS, X265_PRESETS
 from .widgets import CompareVideoDialog, DropLineEdit, DropOverlay, dropped_paths
 from .workers import ArchiveWorker, DurationProbeWorker, ResultSettingsWorker, ThumbnailRunnable, UnifiedScanWorker
 
-RENDERERS = ["libx265", "videotoolbox"]  # index = encoder combo index = saved renderer_index
-# (CRF for libx265, quality for VideoToolbox); "archive" matches the long-standing defaults.
-QUALITY_PRESETS = {"small": (26, 45), "archive": (20, 65), "high": (17, 80)}
-RESOLUTIONS = [None, 3840, 2560, 1920, 1280, 720]
-FRAME_RATES = [None, 60, 50, 30, 25, 24]
-X265_PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
 STATUS_FILTERS = [
     ("all", None), ("planned", {"planned"}), ("running", {"running"}),
     ("done", {"done", "exists"}), ("skipped", {"skipped"}), ("error", {"error"}),
@@ -943,6 +939,35 @@ class ArchiverGUI(QWidget):
         self.reorder_queue()
         self.update_detail_bar()
 
+    def current_run_settings(self):
+        """The compression settings as the drawer shows them, in the form the worker takes."""
+        return {
+            'limit_res': self.combo_res.currentData() is not None,
+            'max_res': self.combo_res.currentData() or 0,
+            'limit_fps': self.combo_fps.currentData() is not None,
+            'max_fps': self.combo_fps.currentData() or 0,
+            'renderer': RENDERERS[self.combo_renderer.currentIndex()],
+            'crf': self.slider_crf.value(),
+            'preset': self.combo_preset.currentText(),
+            'vt_quality': self.slider_vt.value(),
+            'overwrite': self.cb_overwrite.isChecked(),
+            'copy_aac': self.cb_copy_aac.isChecked(),
+            'dry_run': self.cb_dry_run.isChecked(),
+            'low_priority': self.cb_low_priority.isChecked(),
+        }
+
+    def apply_run_settings(self, settings):
+        """Puts settings (as from current_run_settings, e.g. chosen in the compression lab) into the drawer."""
+        self.combo_renderer.setCurrentIndex(RENDERERS.index(settings['renderer']))
+        self.slider_crf.setValue(settings['crf'])
+        self.slider_vt.setValue(settings['vt_quality'])
+        self.combo_preset.setCurrentText(settings['preset'])
+        res = settings['max_res'] if settings['limit_res'] else None
+        fps = settings['max_fps'] if settings['limit_fps'] else None
+        self.combo_res.setCurrentIndex(RESOLUTIONS.index(res) if res in RESOLUTIONS else 0)
+        self.combo_fps.setCurrentIndex(FRAME_RATES.index(fps) if fps in FRAME_RATES else 0)
+        self.update_quality_state()
+
     def start_archiving(self):
         if self.is_archiving() or not self.queue_items():
             return
@@ -969,20 +994,7 @@ class ArchiverGUI(QWidget):
             if reply != QMessageBox.Yes:
                 return
 
-        settings = {
-            'limit_res': self.combo_res.currentData() is not None,
-            'max_res': self.combo_res.currentData() or 0,
-            'limit_fps': self.combo_fps.currentData() is not None,
-            'max_fps': self.combo_fps.currentData() or 0,
-            'renderer': RENDERERS[self.combo_renderer.currentIndex()],
-            'crf': self.slider_crf.value(),
-            'preset': self.combo_preset.currentText(),
-            'vt_quality': self.slider_vt.value(),
-            'overwrite': self.cb_overwrite.isChecked(),
-            'copy_aac': self.cb_copy_aac.isChecked(),
-            'dry_run': self.cb_dry_run.isChecked(),
-            'low_priority': self.cb_low_priority.isChecked(),
-        }
+        settings = self.current_run_settings()
         queue = self.queue_items()
         for item in queue:  # re-runs (overwrite, retry) start from a clean row
             self.model.update(item['path'], status="planned", progress=0, speed="", note="")
@@ -1239,6 +1251,7 @@ class ArchiverGUI(QWidget):
         src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
         if row.status == "planned":
             menu.addAction(tr("Process next"), lambda: self.move_up(row))
+        menu.addAction(tr("Inspect different compressions"), lambda: self.open_lab(row)).setEnabled(src_ok)
         if dst_ok:
             menu.addAction(tr("Compare"), lambda: self.compare(row)).setEnabled(src_ok and row.status != "running")
         else:
@@ -1281,6 +1294,7 @@ class ArchiverGUI(QWidget):
         if row.status == "planned":
             first = bool(self.moved_up) and self.moved_up[0] == str(row.src)
             add(tr("Process next"), lambda: self.move_up(row), not first)
+        add(tr("Inspect different compressions"), lambda: self.open_lab(row), src_ok)
         if src_ok and dst_ok and row.status != "running":  # the result is being rewritten
             add(tr("Compare"), lambda: self.compare(row))
         elif src_ok and not dst_ok:
@@ -1307,6 +1321,12 @@ class ArchiverGUI(QWidget):
             self.show_log(row)
         else:
             self.compare(row)  # nothing to compare with yet: just play the original
+
+    def open_lab(self, row):
+        """Opens the compression lab for this video; the drawer's settings are its starting point."""
+        self.lab_dialog = CompressionLabDialog(row.src, row.duration, self.current_run_settings(),
+                                               self.apply_run_settings, self)
+        self.lab_dialog.show()
 
     def compare(self, row):
         has_result = row.dst.exists() and row.out_size is not None
