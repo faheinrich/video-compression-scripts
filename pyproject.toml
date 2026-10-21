@@ -1,66 +1,8 @@
-[project]
-name = "video-helper-tools"
-version = "1.0.0"
-description = "Desktop suite for compressing/archiving, syncing and transcribing videos."
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "PySide6>=6.10",
-    "numpy",
-    "matplotlib",
-    "librosa",
-    "opencv-python",
-    "requests",
-    "tqdm",
-    "pympi-ling",
-    "silero-vad[onnx-cpu]",
-    "torch",
-    "transformers",
-    "fastapi",
-    "uvicorn",
-    "pydantic",
-]
+# Workspace root: one lock file and one dev environment for the three packages.
+[tool.uv.workspace]
+members = ["core", "archive-helper", "analysis-helper"]
 
-[project.scripts]
-run-whisper-server = "video_helper_tools.transcriber.run_minimal_whisper_server:main"
-annotate-to-elan = "video_helper_tools.transcriber.transcribe_video_to_elan:main"
-
-[dependency-groups]
-dev = [
-    "pyinstaller",
-    "pytest>=9.1.1",
-    "pytest-cov>=7.1.0",
-]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["video_helper_tools"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
-
-[tool.coverage.run]
-source = ["video_helper_tools"]
-branch = true
-omit = [
-    "*/compressor/main.py",                       # start scripts
-    "*/transcriber/run_minimal_whisper_server.py",
-    "*/core/audio_utils.py",                      # unused legacy helpers
-]
-
-[tool.coverage.report]
-show_missing = true
-skip_empty = true
-
-# Linux: the default torch wheel pulls in CUDA (several GB); the app only needs the CPU build.
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
+video-helper-core = { workspace = true }
+archive-helper = { workspace = true }
+analysis-helper = { workspace = true }

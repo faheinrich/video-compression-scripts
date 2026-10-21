@@ -9,6 +9,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        include:
+          - {package: video-helper-core, dir: core}
+          - {package: archive-helper, dir: archive-helper}
+          - {package: analysis-helper, dir: analysis-helper}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -24,23 +28,27 @@ jobs:
       - name: Install ffmpeg and exiftool (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg exiftool
-      - run: uv sync --group dev
+      # Only this package's dependencies (the archive app does not need PyTorch).
+      - run: uv sync --package ${{ matrix.package }} --group dev
       - name: Run tests with coverage
-        run: uv run pytest --cov --cov-report=term-missing --cov-report=xml --cov-report=html
+        working-directory: ${{ matrix.dir }}
+        run: uv run --package ${{ matrix.package }} pytest --cov --cov-report=term-missing --cov-report=xml --cov-report=html
         env:
           QT_QPA_PLATFORM: offscreen
       - name: Coverage summary
         if: always()
+        working-directory: ${{ matrix.dir }}
         shell: bash
-        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
+        run: uv run --package ${{ matrix.package }} coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
       - uses: codecov/codecov-action@v5
         if: matrix.os == 'ubuntu-latest' && always()
         with:
-          files: coverage.xml
+          files: ${{ matrix.dir }}/coverage.xml
+          flags: ${{ matrix.package }}
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage-${{ matrix.os }}
-          path: htmlcov
+          name: coverage-${{ matrix.package }}-${{ matrix.os }}
+          path: ${{ matrix.dir }}/htmlcov

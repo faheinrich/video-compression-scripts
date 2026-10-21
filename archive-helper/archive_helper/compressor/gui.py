@@ -1,0 +1,1239 @@
+import csv
+import json
+import shutil
+import time
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QObject, Qt, QThreadPool, QTimer, Slot
+from PySide6.QtGui import QFontDatabase, QIntValidator, QKeySequence, QPixmap, QShortcut
+from PySide6.QtWidgets import (
+    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QGridLayout,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
+    QPushButton, QScrollArea, QSlider, QStyle, QTableView, QToolButton, QVBoxLayout, QWidget,
+)
+
+from video_helper_core.style import STYLE, caption
+from video_helper_core.i18n import tr
+from video_helper_core.paths import settings_file
+from .model import (
+    COL_DURATION, COL_FILE, COL_RESULT, COL_SETTINGS, COL_SIZE, COL_STATUS,
+    FileDelegate, StatusDelegate, VideoFilterProxy, VideoRow, VideoTableModel,
+)
+from .utils import (
+    DEFAULT_EXCLUDES, DEFAULT_POSTFIX, check_dependencies, clean_postfix, clear_caches, format_size, open_in_finder, parse_excludes,
+    prune_thumbnails,
+)
+from .widgets import CompareVideoDialog, DropLineEdit
+from .workers import ArchiveWorker, DurationProbeWorker, ResultSettingsWorker, ThumbnailRunnable, UnifiedScanWorker
+
+RENDERERS = ["libx265", "videotoolbox"]  # index = encoder combo index = saved renderer_index
+# (CRF for libx265, quality for VideoToolbox); "archive" matches the long-standing defaults.
+QUALITY_PRESETS = {"small": (26, 45), "archive": (20, 65), "high": (17, 80)}
+RESOLUTIONS = [None, 3840, 2560, 1920, 1280, 720]
+FRAME_RATES = [None, 60, 50, 30, 25, 24]
+X265_PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]
+STATUS_FILTERS = [
+    ("all", None), ("planned", {"planned"}), ("running", {"running"}),
+    ("done", {"done", "exists"}), ("skipped", {"skipped"}), ("error", {"error"}),
+]
+
+
+def describe_crf(value):
+    """What a libx265 CRF value means for archives (lower = better quality, larger files)."""
+    if value <= 17:
+        return tr("Practically lossless, very large files.")
+    if value <= 19:
+        return tr("Visually lossless.")
+    if value <= 23:
+        return tr("The sweet spot for archives.")
+    if value <= 28:
+        return tr("Smaller files, slight visible loss.")
+    return tr("Clearly visible loss.")
+
+
+def describe_vt(value):
+    """What a VideoToolbox quality value means (higher = better quality, larger files)."""
+    if value < 45:
+        return tr("Small files, visible loss.")
+    if value < 60:
+        return tr("Good balance of size and quality.")
+    if value < 80:
+        return tr("Very high quality, almost visually lossless.")
+    return tr("Visually lossless; files can get very large.")
+
+
+def format_duration_long(seconds):
+    minutes = max(1, round(seconds / 60))
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    if days:
+        return tr("{days} d {hours} h", days=days, hours=hours)
+    if hours:
+        return tr("{hours} h {minutes} min", hours=hours, minutes=minutes)
+    return tr("{minutes} min", minutes=minutes)
+
+
+def nearest_existing(path):
+    path = Path(path).expanduser()
+    for candidate in [path, *path.parents]:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+class ResizeWatcher(QObject):
+    """Calls a function whenever the watched widget changes its size."""
+
+    def __init__(self, widget, callback):
+        super().__init__(widget)
+        self.callback = callback
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize:
+            self.callback()
+        return False
+
+
+class JobsBox(QComboBox):
+    """Common values to pick from, or type any number."""
+    CHOICES = [1, 2, 3, 4, 6, 8]
+
+    def __init__(self):
+        super().__init__()
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        self.addItems([str(c) for c in self.CHOICES])
+        self.setValidator(QIntValidator(1, 64, self))
+        self.setValue(2)
+
+    def value(self):
+        try:
+            return max(1, min(64, int(self.currentText())))
+        except ValueError:
+            return 1
+
+    def setValue(self, value):
+        self.setCurrentText(str(int(value)))
+
+
+class LogDialog(QDialog):
+    def __init__(self, row, parent=None):
+        super().__init__(parent)
+        self.path = str(row.src)
+        self.setWindowTitle(tr("Log: {name}", name=row.src.name))
+        self.resize(760, 420)
+        layout = QVBoxLayout(self)
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.text.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        self.text.setPlainText("\n".join(row.log) or tr("No log output yet."))
+        layout.addWidget(self.text)
+
+    def append(self, line):
+        self.text.appendPlainText(line)
+
+
+class ArchiverGUI(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(tr("Compress & Archive"))
+        self.setStyleSheet(STYLE)
+        self.resize(1200, 820)
+
+        self.worker = None
+        self.scan_worker = None
+        self.duration_worker = None
+        self.settings_worker = None
+        self.log_dialog = None
+        self.video_data_list = []
+        self.scan_items = []
+        self.moved_up = []
+        self.total_src_bytes = 0
+        self.total_dst_bytes = 0
+        self.run_started = None
+        self.run_bytes = 0
+        self.run_paths = set()
+        self.rescan_pending = False
+
+        self.model = VideoTableModel(self)
+        self.proxy = VideoFilterProxy(self)
+        self.proxy.setSourceModel(self.model)
+
+        self.scan_timer = QTimer(self, singleShot=True, interval=400)
+        self.scan_timer.timeout.connect(self.auto_scan)
+        self.summary_timer = QTimer(self, singleShot=True, interval=200)
+        self.summary_timer.timeout.connect(self.refresh_summary)
+        self.eta_timer = QTimer(self, interval=1000)
+        self.eta_timer.timeout.connect(self.refresh_summary)
+
+        self.init_ui()
+        self.model.changed.connect(self.request_summary)
+        self.load_defaults()
+        self.refresh_summary()
+        self.check_system_dependencies()
+        prune_thumbnails()
+
+    # ------------------------------------------------------------------ layout
+    FIXED_COLUMNS = {COL_DURATION: 80, COL_SIZE: 100, COL_RESULT: 150, COL_STATUS: 160}
+    SETTINGS_COLUMN_WIDTH, MIN_SETTINGS_COLUMN_WIDTH, MIN_FILE_COLUMN_WIDTH, SMALLEST_FILE_COLUMN_WIDTH = 320, 100, 200, 120
+
+    def fit_columns(self):
+        """Columns can be dragged. Until the user drags one, the file name gets the room that is left; the
+        settings column takes what remains of that and disappears when it is too little (it comes back when the
+        window gets wider or the settings drawer is closed)."""
+        header = self.table.horizontalHeader()
+        self.fitting_columns = True
+        try:
+            # The last column stretches to the edge, so its own width says nothing about what it needs.
+            others = sum(header.sectionSize(c) if c in self.dragged_columns or c != COL_STATUS else self.FIXED_COLUMNS[c]
+                         for c in self.FIXED_COLUMNS)
+            width = self.table.viewport().width()
+            spare = width - others - self.MIN_FILE_COLUMN_WIDTH
+            if COL_SETTINGS in self.dragged_columns:
+                header.showSection(COL_SETTINGS)
+            elif spare < self.MIN_SETTINGS_COLUMN_WIDTH:
+                header.hideSection(COL_SETTINGS)
+            else:
+                header.showSection(COL_SETTINGS)
+                header.resizeSection(COL_SETTINGS, min(self.SETTINGS_COLUMN_WIDTH, spare))
+            if COL_FILE not in self.dragged_columns:
+                settings = 0 if header.isSectionHidden(COL_SETTINGS) else header.sectionSize(COL_SETTINGS)
+                header.resizeSection(COL_FILE, max(self.SMALLEST_FILE_COLUMN_WIDTH, width - others - settings))
+        finally:
+            self.fitting_columns = False
+
+    def remember_dragged_column(self, column, old_size, new_size):
+        if not self.fitting_columns and not self.table.horizontalHeader().isSectionHidden(column):
+            self.dragged_columns.add(column)
+
+    def init_ui(self):
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        main = QVBoxLayout()
+        main.setContentsMargins(12, 4, 12, 12)
+        main.setSpacing(10)
+        main.addLayout(self.build_header())
+        main.addWidget(self.build_summary())
+        main.addLayout(self.build_toolbar())
+        main.addWidget(self.build_table(), stretch=1)
+        self.detail_bar = QFrame(objectName="detailBar")
+        self.detail_layout = QHBoxLayout(self.detail_bar)
+        self.detail_layout.setContentsMargins(12, 8, 12, 8)
+        self.detail_bar.hide()
+        main.addWidget(self.detail_bar)
+        root.addLayout(main, stretch=1)
+
+        self.drawer = self.build_drawer()
+        root.addWidget(self.drawer)
+
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=self.start_unified_scan)
+        self.set_run_mode(False)
+
+    def folder_field(self, label, placeholder):
+        column = QVBoxLayout()
+        column.setSpacing(4)
+        column.addWidget(caption(label))
+        row = QHBoxLayout()
+        edit = DropLineEdit()
+        edit.setPlaceholderText(placeholder)
+        edit.setToolTip(tr("Type a path, drop a folder here, or choose one."))
+        button = QPushButton(tr("Choose…"))
+        button.clicked.connect(lambda: self.browse_folder(edit))
+        row.addWidget(edit, stretch=1)
+        row.addWidget(button)
+        column.addLayout(row)
+        return column, edit
+
+    def build_header(self):
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        src_col, self.txt_src = self.folder_field(tr("Source"), tr("Folder with the original videos"))
+        dst_col, self.txt_dst = self.folder_field(tr("Target"), tr("Where the compressed videos go"))
+        arrow = QLabel("→")
+        arrow.setAlignment(Qt.AlignBottom)
+        arrow.setContentsMargins(0, 0, 0, 6)
+        header.addLayout(src_col, stretch=1)
+        header.addWidget(arrow)
+        header.addLayout(dst_col, stretch=1)
+        for edit in (self.txt_src, self.txt_dst):
+            edit.textChanged.connect(self.schedule_scan)
+
+        actions = QVBoxLayout()
+        actions.addStretch()
+        buttons = QHBoxLayout()
+        self.btn_settings = QPushButton(tr("Settings"))
+        self.btn_settings.setCheckable(True)
+        self.btn_settings.setChecked(True)
+        self.btn_settings.toggled.connect(lambda visible: self.drawer.setVisible(visible))
+        more = QToolButton()
+        more.setText("⋯")
+        more.setToolTip(tr("More actions"))
+        more.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(more)
+        # The shortcut itself is a window-wide QShortcut; the menu only shows it.
+        shortcut = QKeySequence("Ctrl+R").toString(QKeySequence.NativeText)
+        menu.addAction(f"{tr('Scan again')}\t{shortcut}", self.start_unified_scan)
+        menu.addAction(tr("Export list as CSV…"), self.export_logs)
+        menu.addAction(tr("Clear thumbnail and duration cache"), self.clear_cache)
+        more.setMenu(menu)
+        self.btn_run = QPushButton(objectName="runButton")
+        self.btn_run.clicked.connect(self.toggle_run)
+        buttons.addWidget(self.btn_settings)
+        buttons.addWidget(more)
+        buttons.addWidget(self.btn_run)
+        actions.addLayout(buttons)
+        header.addLayout(actions)
+        return header
+
+    def build_summary(self):
+        frame = QFrame(objectName="summary")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(28)
+        self.summary_values = {}
+        for key, label in (("count", tr("Videos")), ("size", tr("Size")), ("saving", tr("Savings")), ("free", tr("Free at target"))):
+            column = QVBoxLayout()
+            column.setSpacing(0)
+            caption_label = caption(label)
+            value = QLabel("–")
+            value.setProperty("role", "value")
+            column.addWidget(caption_label)
+            column.addWidget(value)
+            layout.addLayout(column)
+            self.summary_values[key] = (caption_label, value)
+        progress = QVBoxLayout()
+        progress.setSpacing(6)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_text = QLabel()
+        self.progress_text.setProperty("role", "hint")
+        self.progress_text.setWordWrap(True)
+        progress.addWidget(self.progress_bar)
+        progress.addWidget(self.progress_text)
+        layout.addLayout(progress, stretch=1)
+        return frame
+
+    def build_toolbar(self):
+        bar = QHBoxLayout()
+        bar.setSpacing(6)
+        self.filter_group = QButtonGroup(self)
+        self.filter_buttons = {}
+        for key, _ in STATUS_FILTERS:
+            button = QPushButton()
+            button.setCheckable(True)
+            button.setProperty("role", "chip")
+            button.setFocusPolicy(Qt.TabFocus)
+            self.filter_group.addButton(button)
+            self.filter_buttons[key] = button
+            button.clicked.connect(lambda _=False, k=key: self.set_filter(k))
+            bar.addWidget(button)
+        self.filter_buttons["all"].setChecked(True)
+        bar.addStretch()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(tr("Search files"))
+        self.search.setClearButtonEnabled(True)
+        self.search.setMaximumWidth(240)
+        self.search.textChanged.connect(self.proxy.set_text_filter)
+        bar.addWidget(self.search)
+        return bar
+
+    def build_table(self):
+        self.table = QTableView()
+        self.table.setModel(self.proxy)
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(COL_SIZE, Qt.DescendingOrder)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        # The vertical header numbers the rows as shown, i.e. in processing order, whatever the sort.
+        vheader = self.table.verticalHeader()
+        vheader.setDefaultSectionSize(46)
+        vheader.setSectionResizeMode(QHeaderView.Fixed)
+        vheader.setMinimumWidth(36)
+        vheader.setDefaultAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        vheader.setHighlightSections(False)
+        vheader.setStyleSheet("QHeaderView { background: transparent; } QHeaderView::section { background: transparent; border: none; color: #8a8f98; padding-right: 8px; }")
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(COL_FILE, QHeaderView.Interactive)
+        header.setStretchLastSection(True)
+        self.dragged_columns, self.fitting_columns = set(), False
+        for col, width in self.FIXED_COLUMNS.items():
+            header.setSectionResizeMode(col, QHeaderView.Interactive)
+            header.resizeSection(col, width)
+        header.setSectionResizeMode(COL_SETTINGS, QHeaderView.Interactive)
+        header.sectionResized.connect(self.remember_dragged_column)
+        self.column_watcher = ResizeWatcher(self.table.viewport(), self.fit_columns)
+        header.setHighlightSections(False)
+        self.table.setItemDelegateForColumn(COL_FILE, FileDelegate(self.model, self.table))
+        self.table.setItemDelegateForColumn(COL_STATUS, StatusDelegate(self.table))
+        self.table.selectionModel().selectionChanged.connect(self.update_detail_bar)
+        header.sortIndicatorChanged.connect(self.reorder_queue)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_row_menu)
+        header.setToolTip(tr("Videos are processed in this order. Click a column to change it."))
+        self.table.doubleClicked.connect(self.on_row_double_clicked)
+        return self.table
+
+    def slider_row(self, label, minimum, maximum, scale, describe):
+        box = QWidget()
+        column = QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(minimum, maximum)
+        value = QLabel()
+        value.setMinimumWidth(24)
+        value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        # Visible guidance (a tooltip alone is easy to miss): what the current value means,
+        # then the whole scale.
+        current = QLabel()
+        current.setWordWrap(True)
+        legend = QLabel(scale)
+        legend.setProperty("role", "hint")
+        legend.setWordWrap(True)
+
+        def show(v):
+            value.setText(str(v))
+            current.setText(tr("Current: {meaning}", meaning=describe(v)))
+
+        slider.valueChanged.connect(show)
+        row.addWidget(slider, stretch=1)
+        row.addWidget(value)
+        column.addLayout(row)
+        column.addWidget(current)
+        column.addWidget(legend)
+        return box, slider, current
+
+    def segment(self, text, key):
+        button = QPushButton(text)
+        button.setCheckable(True)
+        button.setProperty("role", "segment")
+        button.clicked.connect(lambda: self.apply_quality_preset(key))
+        return button
+
+    def build_drawer(self):
+        drawer = QFrame(objectName="drawer")
+        drawer.setFixedWidth(340)
+        outer = QVBoxLayout(drawer)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+        self.drawer_scroll = scroll
+        content = QWidget()
+        scroll.setWidget(content)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(16)
+
+        title = QLabel(tr("Settings"))
+        title.setStyleSheet("font-weight: 600; font-size: 14px;")
+        layout.addWidget(title)
+
+        # Quality presets
+        quality = QVBoxLayout()
+        quality.setSpacing(6)
+        quality.addWidget(caption(tr("Quality")))
+        segments = QHBoxLayout()
+        segments.setSpacing(0)
+        self.quality_buttons = {
+            "small": self.segment(tr("Small"), "small"),
+            "archive": self.segment(tr("Archive"), "archive"),
+            "high": self.segment(tr("High"), "high"),
+        }
+        for button in self.quality_buttons.values():
+            segments.addWidget(button)
+        quality.addLayout(segments)
+        self.quality_hint = QLabel()
+        self.quality_hint.setProperty("role", "hint")
+        self.quality_hint.setWordWrap(True)
+        quality.addWidget(self.quality_hint)
+        layout.addLayout(quality)
+
+        # Encoder
+        encoder = QVBoxLayout()
+        encoder.setSpacing(6)
+        encoder.addWidget(caption(tr("Encoder")))
+        self.combo_renderer = QComboBox()
+        self.combo_renderer.addItems([tr("CPU (libx265, smaller files)"), tr("Mac GPU (VideoToolbox, fast)")])
+        self.combo_renderer.currentIndexChanged.connect(self.update_quality_state)
+        encoder.addWidget(self.combo_renderer)
+        layout.addLayout(encoder)
+
+        # Limits and parallelism
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        grid.addWidget(caption(tr("Limits")), 0, 0, 1, 2)
+        self.combo_res = QComboBox()
+        for value in RESOLUTIONS:
+            self.combo_res.addItem(tr("No limit") if value is None else tr("{pixels} px (long side)", pixels=value), value)
+        self.combo_res.setCurrentIndex(RESOLUTIONS.index(1920))
+        self.combo_fps = QComboBox()
+        for value in FRAME_RATES:
+            self.combo_fps.addItem(tr("No limit") if value is None else f"{value} fps", value)
+        self.combo_fps.setCurrentIndex(FRAME_RATES.index(30))
+        self.spin_jobs = JobsBox()
+        self.spin_jobs.setToolTip(tr("More parallel videos only help while CPU or GPU still have headroom."))
+        grid.addWidget(QLabel(tr("Resolution")), 1, 0)
+        grid.addWidget(self.combo_res, 1, 1)
+        grid.addWidget(QLabel(tr("Frame rate")), 2, 0)
+        grid.addWidget(self.combo_fps, 2, 1)
+        grid.addWidget(QLabel(tr("Parallel videos")), 3, 0)
+        grid.addWidget(self.spin_jobs, 3, 1)
+        grid.setColumnStretch(1, 1)
+        layout.addLayout(grid)
+
+        photos = QVBoxLayout()
+        photos.setSpacing(4)
+        photos.addWidget(caption(tr("Apple Photos")))
+        photos_hint = QLabel(tr("Output is always HEVC (hvc1) with AAC audio; capture date and location are kept."))
+        photos_hint.setProperty("role", "hint")
+        photos_hint.setWordWrap(True)
+        photos.addWidget(photos_hint)
+        layout.addLayout(photos)
+
+        # Advanced
+        self.btn_advanced = QToolButton()
+        self.btn_advanced.setText(tr("Advanced"))
+        self.btn_advanced.setCheckable(True)
+        self.btn_advanced.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_advanced.setArrowType(Qt.RightArrow)
+        self.btn_advanced.setAutoRaise(True)
+        self.btn_advanced.setStyleSheet("font-weight: 600;")
+        layout.addWidget(self.btn_advanced)
+        self.advanced = QWidget()
+        adv = QVBoxLayout(self.advanced)
+        adv.setContentsMargins(0, 0, 0, 0)
+        adv.setSpacing(8)
+
+        # Only the controls of the selected encoder are shown (see update_quality_state).
+        self.cpu_quality, self.slider_crf, self.crf_hint = self.slider_row(
+            tr("CRF"), 0, 51,
+            tr("Lower means better quality and larger files; 18-19 is visually lossless, 20-23 the sweet spot for archives."),
+            describe_crf)
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel(tr("Preset")))
+        self.combo_preset = QComboBox()
+        self.combo_preset.addItems(X265_PRESETS)
+        self.combo_preset.setCurrentText("slow")
+        preset_row.addWidget(self.combo_preset, stretch=1)
+        self.cpu_quality.layout().addLayout(preset_row)
+        preset_hint = QLabel(tr("Slower presets give smaller files at the same quality but take longer."))
+        preset_hint.setProperty("role", "hint")
+        preset_hint.setWordWrap(True)
+        self.cpu_quality.layout().addWidget(preset_hint)
+        self.gpu_quality, self.slider_vt, self.vt_hint = self.slider_row(
+            tr("Quality"), 1, 100,
+            tr("Higher means better quality and larger files; 45-59 is balanced, 60-79 almost visually lossless, 80+ visually lossless."),
+            describe_vt)
+        adv.addWidget(self.cpu_quality)
+        adv.addWidget(self.gpu_quality)
+        for slider in (self.slider_crf, self.slider_vt):
+            slider.valueChanged.connect(self.update_quality_state)
+
+        # Short labels: QCheckBox does not wrap, so long texts would widen the whole drawer.
+        self.cb_copy_aac = QCheckBox(tr("Copy AAC audio 1:1"))
+        self.cb_copy_aac.setToolTip(tr("Lossless and faster; only applies when the source already has AAC audio."))
+        self.cb_copy_aac.setChecked(True)
+        self.cb_flatten = QCheckBox(tr("Don't keep subfolders"))
+        self.cb_flatten.setToolTip(tr("All videos go directly into the target folder."))
+        self.cb_flatten.toggled.connect(self.schedule_scan)
+        self.cb_overwrite = QCheckBox(tr("Overwrite existing results"))
+        self.cb_overwrite.setToolTip(tr("Videos that already have a result in the target folder are compressed again."))
+        self.cb_overwrite.toggled.connect(self.update_run_enabled)
+        self.cb_overwrite.toggled.connect(self.request_summary)
+        self.cb_dry_run = QCheckBox(tr("Test run (first second only)"))
+        self.cb_dry_run.setToolTip(tr("Compresses only the first second of each video to check the settings quickly."))
+        for box in (self.cb_copy_aac, self.cb_flatten, self.cb_overwrite, self.cb_dry_run):
+            adv.addWidget(box)
+
+        adv.addWidget(caption(tr("Names")))
+        self.txt_postfix = QLineEdit(DEFAULT_POSTFIX)
+        self.txt_postfix.setToolTip(tr("Appended to the name of each result, e.g. clip{postfix}.mp4.", postfix=DEFAULT_POSTFIX))
+        self.txt_excludes = QLineEdit(DEFAULT_EXCLUDES)
+        self.txt_excludes.setToolTip(tr("Source videos whose name ends with one of these (separated by commas) are skipped, "
+                                        "e.g. results of earlier runs. The result postfix is always skipped."))
+        for label, edit in ((tr("Result postfix"), self.txt_postfix), (tr("Skip names ending in"), self.txt_excludes)):
+            adv.addWidget(QLabel(label))
+            adv.addWidget(edit)
+            edit.textChanged.connect(self.schedule_scan)
+        self.advanced.hide()
+        self.btn_advanced.toggled.connect(self.advanced.setVisible)
+        self.btn_advanced.toggled.connect(lambda on: self.btn_advanced.setArrowType(Qt.DownArrow if on else Qt.RightArrow))
+        layout.addWidget(self.advanced)
+
+        layout.addStretch()
+        self.btn_save_defaults = QPushButton(tr("Save as default"))
+        self.btn_save_defaults.clicked.connect(self.save_defaults)
+        layout.addWidget(self.btn_save_defaults)
+
+        self.apply_quality_preset("archive")
+        return drawer
+
+    # ------------------------------------------------------------ settings UI
+    def apply_quality_preset(self, key):
+        crf, vt = QUALITY_PRESETS[key]
+        self.slider_crf.setValue(crf)
+        self.slider_vt.setValue(vt)
+        self.update_quality_state()
+
+    def update_quality_state(self):
+        cpu = self.combo_renderer.currentIndex() == 0
+        # A preset counts as active when the selected encoder's value matches it.
+        position, value = (0, self.slider_crf.value()) if cpu else (1, self.slider_vt.value())
+        active = next((k for k, v in QUALITY_PRESETS.items() if v[position] == value), None)
+        for key, button in self.quality_buttons.items():
+            button.setChecked(key == active)
+        hints = {
+            "small": tr("Much smaller files, some visible loss of detail."),
+            "archive": tr("Hardly any visible difference to the original."),
+            "high": tr("Practically lossless; files stay large."),
+        }
+        detail = tr("CRF {value}", value=value) if cpu else tr("VideoToolbox quality {value}", value=value)
+        self.quality_hint.setText(f"{hints[active]} ({detail})" if active else tr("Custom: {detail}", detail=detail))
+        changed = (self.cpu_quality.isVisibleTo(self.advanced) != cpu
+                   or self.gpu_quality.isVisibleTo(self.advanced) == cpu)
+        self.cpu_quality.setVisible(cpu)
+        self.gpu_quality.setVisible(not cpu)
+        if changed:
+            # Word-wrapped labels keep a height computed for another width after being
+            # hidden; recompute so the section does not get uneven gaps.
+            self.drawer_scroll.widget().layout().invalidate()
+
+    def browse_folder(self, line_edit):
+        folder = QFileDialog.getExistingDirectory(self, tr("Choose folder"), line_edit.text())
+        if folder:
+            line_edit.setText(folder)
+
+    def check_system_dependencies(self):
+        missing = check_dependencies()
+        if missing:
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Critical)
+            msg.setWindowTitle(tr("Missing system dependencies"))
+            msg.setText(tr("The following required tools were not found:\n\n{tools}", tools=", ".join(missing)))
+            msg.setInformativeText(tr("Please install them (e.g. via Homebrew: 'brew install ffmpeg exiftool') so the app works."))
+            msg.exec()
+
+    # ------------------------------------------------------------------ state
+    def src_dir(self):
+        return Path(self.txt_src.text().strip()).expanduser()
+
+    def dst_dir(self):
+        return Path(self.txt_dst.text().strip()).expanduser()
+
+    def postfix(self):
+        return clean_postfix(self.txt_postfix.text())
+
+    def is_archiving(self):
+        return self.worker is not None and self.worker.isRunning()
+
+    def is_scanning(self):
+        return self.scan_worker is not None and self.scan_worker.isRunning()
+
+    def is_busy(self):
+        return self.is_archiving() or self.is_scanning()
+
+    def shutdown(self):
+        self.scan_timer.stop()
+        for worker in (self.worker, self.scan_worker, self.duration_worker, self.settings_worker):
+            if worker is not None and worker.isRunning():
+                if hasattr(worker, "stop"):
+                    worker.stop()
+                worker.wait()
+
+    def set_run_mode(self, running):
+        self.btn_run.setProperty("mode", "stop" if running else "start")
+        self.btn_run.setText(tr("Stop") if running else tr("Start archiving"))
+        self.btn_run.setIcon(self.style().standardIcon(QStyle.SP_MediaStop if running else QStyle.SP_MediaPlay))
+        self.btn_run.style().unpolish(self.btn_run)
+        self.btn_run.style().polish(self.btn_run)
+        self.update_run_enabled()
+
+    def run_blocked_reason(self):
+        """Why the start button is disabled, or "" when it is not."""
+        if self.is_archiving():
+            return ""
+        if self.is_scanning():
+            return tr("The folders are still being scanned.")
+        if not self.txt_src.text().strip() or not self.txt_dst.text().strip():
+            return tr("Choose a source and a target folder first.")
+        if not self.queue_items():
+            if self.scan_items:
+                return tr("Nothing to do: all videos already have a result. Turn on “Overwrite existing results” to compress them again.")
+            return tr("No videos found in the source folder.")
+        return ""
+
+    def update_run_enabled(self):
+        reason = self.run_blocked_reason()
+        self.btn_run.setEnabled(not reason)
+        self.btn_run.setToolTip(reason)
+        for widget in (self.spin_jobs, self.txt_src, self.txt_dst, self.cb_flatten, self.txt_postfix, self.txt_excludes):
+            widget.setEnabled(not self.is_archiving())
+
+    def request_summary(self):
+        # Progress updates arrive many times per second; coalesce them.
+        if not self.summary_timer.isActive():
+            self.summary_timer.start()
+
+    def set_filter(self, key):
+        self.proxy.set_status_filter(dict(STATUS_FILTERS)[key])
+
+    # ------------------------------------------------------------------- scan
+    def schedule_scan(self):
+        if not self.is_archiving():
+            self.scan_timer.start()
+
+    def auto_scan(self):
+        src = self.txt_src.text().strip()
+        if src and self.txt_dst.text().strip() and self.src_dir().is_dir():
+            self.start_unified_scan()
+        else:
+            self.model.reset([])
+            self.scan_items = []
+            self.video_data_list = []
+            self.update_run_enabled()
+
+    def start_unified_scan(self):
+        self.scan_timer.stop()
+        if self.is_archiving():
+            return
+        if self.is_scanning():
+            self.rescan_pending = True
+            return
+        if self.duration_worker is not None and self.duration_worker.isRunning():
+            self.duration_worker.stop()
+            self.duration_worker.wait()
+        if self.settings_worker is not None:
+            self.settings_worker.wait()  # a single exiftool call; results of the old scan are discarded
+        self.total_src_bytes = 0
+        self.total_dst_bytes = 0
+        self.run_paths = set()
+        self.scan_worker = UnifiedScanWorker(
+            self.src_dir(), self.dst_dir(), self.cb_flatten.isChecked(),
+            postfix=self.postfix(), excludes=parse_excludes(self.txt_excludes.text()))
+        self.scan_worker.scan_finished.connect(self.on_unified_scan_finished)
+        # The result arrives while the thread is still ending, so is_scanning() is still true in that handler.
+        self.scan_worker.finished.connect(self.update_run_enabled)
+        self.scan_worker.start()
+        self.update_run_enabled()
+        self.refresh_summary()
+
+    @Slot(list)
+    def on_unified_scan_finished(self, items):
+        src_root = self.src_dir()
+        rows = []
+        for item in items:
+            exists = item.get('exists_compressed')
+            rows.append(VideoRow(
+                src=item['path'], dst=item['dst_path'], size=item['size'], root=src_root,
+                status="exists" if exists else "planned",
+                out_size=item['comp_size'] if exists else None,
+            ))
+        counts = {}
+        for row in rows:
+            counts[row.dst] = counts.get(row.dst, 0) + 1
+        for row in rows:
+            row.duplicate = counts[row.dst] > 1
+        self.scan_items = items
+        self.moved_up = []
+        self.video_data_list = [item for item in items if not item.get('exists_compressed')]
+        self.model.reset(rows)
+        self.detail_bar.hide()
+        self.update_run_enabled()
+        self.refresh_summary()
+
+        # Background signals go to methods of this widget, never to lambdas (see ThumbnailRunnable).
+        for row in rows:
+            runnable = ThumbnailRunnable(row.src)
+            runnable.signals.finished.connect(self.on_thumbnail_ready)
+            QThreadPool.globalInstance().start(runnable)
+        self.duration_worker = DurationProbeWorker([row.src for row in rows])
+        self.duration_worker.duration_found.connect(self.on_duration_found)
+        self.duration_worker.finished.connect(self.request_summary)
+        self.duration_worker.start()
+        self.settings_worker = ResultSettingsWorker([(row.src, row.dst) for row in rows if row.status == "exists"])
+        self.settings_worker.settings_found.connect(self.on_settings_found)
+        self.settings_worker.start()
+
+        if self.rescan_pending:
+            self.rescan_pending = False
+            self.start_unified_scan()
+
+    # ---------------------------------------------------------------- archive
+    def toggle_run(self):
+        if self.is_archiving():
+            self.stop_archiving()
+        else:
+            self.start_archiving()
+
+    def queue_items(self):
+        """Videos to process, in the table's sort order with moved-up videos first."""
+        # Failed videos are retried; with "overwrite", every video with a result is compressed again.
+        wanted = {"planned", "error"}
+        if self.cb_overwrite.isChecked():
+            wanted |= {"exists", "done", "skipped"}
+        items = [item for item in self.scan_items if self.model.row_for(item['path']).status in wanted]
+        header = self.table.horizontalHeader()
+        column = header.sortIndicatorSection()
+        items.sort(key=lambda item: self.model.sort_key(self.model.row_for(item['path']), column),
+                   reverse=header.sortIndicatorOrder() == Qt.DescendingOrder)
+        rank = {path: i for i, path in enumerate(self.moved_up)}
+        items.sort(key=lambda item: rank.get(str(item['path']), len(rank)))  # stable: keeps table order
+        return items
+
+    def reorder_queue(self):
+        if self.is_archiving():
+            self.worker.set_queue(self.queue_items())
+
+    def move_up(self, row):
+        path = str(row.src)
+        if path in self.moved_up:
+            self.moved_up.remove(path)
+        self.moved_up.insert(0, path)
+        self.model.update(row.src, moved_up=True)
+        self.reorder_queue()
+        self.update_detail_bar()
+
+    def start_archiving(self):
+        if self.is_archiving() or not self.queue_items():
+            return
+        if self.cb_overwrite.isChecked():
+            reply = QMessageBox.question(
+                self, tr("Overwrite existing results?"),
+                tr("“Overwrite existing results” is on: existing files in the target folder will be replaced. Continue?"),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+
+        settings = {
+            'limit_res': self.combo_res.currentData() is not None,
+            'max_res': self.combo_res.currentData() or 0,
+            'limit_fps': self.combo_fps.currentData() is not None,
+            'max_fps': self.combo_fps.currentData() or 0,
+            'renderer': RENDERERS[self.combo_renderer.currentIndex()],
+            'crf': self.slider_crf.value(),
+            'preset': self.combo_preset.currentText(),
+            'vt_quality': self.slider_vt.value(),
+            'overwrite': self.cb_overwrite.isChecked(),
+            'copy_aac': self.cb_copy_aac.isChecked(),
+            'dry_run': self.cb_dry_run.isChecked(),
+        }
+        queue = self.queue_items()
+        for item in queue:  # re-runs (overwrite, retry) start from a clean row
+            self.model.update(item['path'], status="planned", progress=0, speed="", note="")
+        self.run_paths = {str(item['path']) for item in queue}
+        self.run_bytes = sum(item['size'] for item in queue)
+        self.run_started = time.monotonic()
+
+        self.worker = ArchiveWorker(self.src_dir(), self.dst_dir(), self.spin_jobs.value(), queue, settings)
+        self.worker.status_update_path.connect(self.on_status_update)
+        self.worker.file_duration_discovered_path.connect(self.on_duration_found)
+        self.worker.file_progress_path.connect(self.on_file_progress)
+        self.worker.ffmpeg_log_line_path.connect(self.on_log_line)
+        # QThread.finished, not finished_all: the latter is emitted while the thread still
+        # runs, so the controls would still treat the run as active.
+        self.worker.finished.connect(self.on_finished_all)
+        self.worker.start()
+        self.set_run_mode(True)
+        self.eta_timer.start()
+        self.refresh_summary()
+
+    def stop_archiving(self):
+        if self.is_archiving():
+            self.btn_run.setEnabled(False)
+            self.worker.stop()
+            self.worker.wait()
+
+    @Slot(str, str, str, dict)
+    def on_status_update(self, path, status, reason, data):
+        if status == "running":
+            self.model.update(path, status="running", speed=reason)
+            return
+        values = {"status": status, "note": reason, "speed": ""}
+        if status in ("finished", "skipped") and data:
+            values["out_size"] = data.get('dst_size')
+            if status == "finished":
+                values["settings"] = data.get('settings')
+            self.total_src_bytes += data.get('src_size', 0)
+            self.total_dst_bytes += data.get('dst_size', 0)
+        if status == "finished":
+            values["status"] = "done"
+        self.model.update(path, **values)
+        self.update_detail_bar()
+
+    @Slot(str, object)
+    def on_thumbnail_ready(self, path, image):
+        if image is not None and not image.isNull():
+            self.model.set_thumbnail(path, QPixmap.fromImage(image))
+
+    @Slot(str, object)
+    def on_settings_found(self, path, settings):
+        self.model.update(path, settings=settings)
+
+    @Slot(str, float)
+    def on_duration_found(self, path, duration):
+        self.model.update(path, duration=duration)
+
+    @Slot(str, int)
+    def on_file_progress(self, path, percent):
+        self.model.update(path, progress=percent)
+
+    @Slot(str, str)
+    def on_log_line(self, path, line):
+        self.model.append_log(path, line)
+        if self.log_dialog is not None and self.log_dialog.path == path and self.log_dialog.isVisible():
+            self.log_dialog.append(line)
+
+    @Slot()
+    def on_finished_all(self):
+        for row in self.model.rows:
+            if row.status == "running":
+                self.model.update(row.src, status="planned", progress=0, speed="")
+        self.eta_timer.stop()
+        self.set_run_mode(False)
+        self.refresh_summary()
+
+    # ---------------------------------------------------------------- summary
+    def refresh_summary(self):
+        rows = self.model.rows
+        counts = self.model.counts()
+        labels = {
+            "all": tr("All"), "planned": tr("Planned"), "running": tr("Running"),
+            "done": tr("Done"), "skipped": tr("Skipped"), "error": tr("Errors"),
+        }
+        for key, statuses in STATUS_FILTERS:
+            count = len(rows) if statuses is None else sum(counts.get(s, 0) for s in statuses)
+            button = self.filter_buttons[key]
+            button.setText(f"{labels[key]}  {count}")
+            button.setVisible(key == "all" or count > 0)
+
+        planned = [r for r in rows if r.status in ("planned", "running")]
+        measured = [r for r in rows if r.ratio is not None]
+        self.set_summary("count", str(len(rows)))
+        self.set_summary("size", format_size(sum(r.size for r in rows)) if rows else "–")
+
+        caption_label, value = self.summary_values["saving"]
+        ratio = sum(r.out_size for r in measured) / sum(r.size for r in measured) if measured else None
+        if ratio is None:
+            caption_label.setText(tr("Savings").upper())
+            self.set_summary("saving", "–", tooltip=tr("Estimated once the first video is finished."))
+        else:
+            saved = sum(r.size - r.out_size for r in measured)
+            planned_bytes = sum(r.size for r in planned)
+            estimate = bool(planned_bytes)
+            saved += planned_bytes * (1 - ratio)
+            total = sum(r.size for r in measured) + planned_bytes
+            caption_label.setText((tr("Savings (estimated)") if estimate else tr("Savings")).upper())
+            prefix = "≈ " if estimate else ""
+            self.set_summary("saving", f"{prefix}{-saved / total * 100:+.0f} % · {format_size(saved)}",
+                             tone="good" if saved >= 0 else "warn",
+                             tooltip=tr("Based on the videos already compressed (ratio {ratio:.0%}).", ratio=ratio))
+
+        target = nearest_existing(self.dst_dir()) if self.txt_dst.text().strip() else None
+        if target is None:
+            self.set_summary("free", "–")
+        else:
+            free = shutil.disk_usage(target).free
+            needed = sum(r.size for r in planned) * (ratio if ratio is not None else 1.0)
+            low = free < needed
+            self.set_summary("free", format_size(free), tone="warn" if low else None,
+                             tooltip=tr("Probably not enough space: about {needed} needed.", needed=format_size(needed)) if low else "")
+
+        self.progress_text.setText(self.progress_message(rows, counts))
+        self.update_run_enabled()
+
+    def set_summary(self, key, text, tone=None, tooltip=""):
+        _, label = self.summary_values[key]
+        label.setText(text)
+        label.setToolTip(tooltip)
+        if label.property("tone") != tone:
+            label.setProperty("tone", tone)
+            label.style().unpolish(label)
+            label.style().polish(label)
+
+    def progress_message(self, rows, counts):
+        if self.is_scanning():
+            self.progress_bar.setRange(0, 0)
+            return tr("Scanning folders…")
+        self.progress_bar.setRange(0, 1000)
+        if not rows:
+            self.progress_bar.setValue(0)
+            if not self.txt_src.text().strip() or not self.txt_dst.text().strip():
+                return tr("Choose a source and a target folder; the scan starts automatically.")
+            return tr("No videos found in the source folder.")
+
+        run_rows = [r for r in rows if str(r.src) in self.run_paths]
+        finished = [r for r in run_rows if r.status in ("done", "skipped", "error")]
+        done_bytes = sum(r.size for r in finished) + sum(r.size * r.progress / 100 for r in run_rows if r.status == "running")
+        self.progress_bar.setValue(int(done_bytes / self.run_bytes * 1000) if self.run_bytes else 0)
+
+        if self.is_archiving():
+            text = tr("{done} of {total} finished", done=len(finished), total=len(run_rows))
+            elapsed = time.monotonic() - self.run_started
+            if done_bytes > 0 and elapsed > 15:
+                rate = done_bytes / elapsed
+                text += " · " + tr("about {time} left", time=format_duration_long((self.run_bytes - done_bytes) / rate))
+            else:
+                text += " · " + tr("estimating time left…")
+            return text
+        parts = []
+        if run_rows:
+            errors = counts.get("error", 0)
+            parts.append(tr("Stopped: {done} of {total} finished.", done=len(finished), total=len(run_rows))
+                         if counts.get("planned") else tr("Finished: {done} videos processed.", done=len(finished)))
+            if errors:
+                parts.append(tr("{count} with errors.", count=errors))
+        queue = self.queue_items()
+        replacing = sum(1 for item in queue if self.model.row_for(item['path']).out_size is not None)
+        if queue and replacing:
+            parts.append(tr("Ready: {count} to compress, {replacing} of them replace an existing result. Order: as sorted in the table.",
+                            count=len(queue), replacing=replacing))
+        elif queue:
+            parts.append(tr("Ready: {count} to compress. Order: as sorted in the table.", count=len(queue)))
+        elif not run_rows:
+            parts.append(tr("Nothing to do: all {count} videos already have a result. Turn on “Overwrite existing results” to compress them again.",
+                            count=len(rows)))
+        if self.duration_worker is not None and self.duration_worker.isRunning():
+            parts.append(tr("Reading durations: {done} of {total}…", done=sum(1 for r in rows if r.duration), total=len(rows)))
+        return " ".join(parts)
+
+    # ------------------------------------------------------------- row detail
+    def selected_row(self):
+        indexes = self.table.selectionModel().selectedRows()
+        return indexes[0].data(Qt.UserRole + 1) if indexes else None
+
+    def add_file_actions(self, menu, row):
+        """Replace/swap/delete; also offered during a run, except for the video being compressed."""
+        src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
+        editable = row.status != "running"
+        for text, action, enabled in (
+            (tr("Replace original with result…"), "overwrite", src_ok and dst_ok),
+            (tr("Swap original and result…"), "swap", src_ok and dst_ok),
+            (tr("Delete original…"), "del_orig", src_ok and dst_ok),  # only with a result to fall back on
+            (tr("Delete result…"), "del_comp", dst_ok),
+        ):
+            act = menu.addAction(text, lambda a=action: self.handle_compare_action(a, row))
+            act.setEnabled(enabled and editable)
+
+    def build_row_menu(self, row):
+        """Everything that can be done with a row; used for the right-click menu."""
+        menu = QMenu(self)
+        src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
+        if row.status == "planned":
+            menu.addAction(tr("Process next"), lambda: self.move_up(row))
+        if dst_ok:
+            menu.addAction(tr("Compare"), lambda: self.compare(row)).setEnabled(src_ok and row.status != "running")
+        else:
+            menu.addAction(tr("Play original"), lambda: self.compare(row)).setEnabled(src_ok)
+        menu.addAction(tr("Show original"), lambda: open_in_finder(row.src)).setEnabled(src_ok)
+        menu.addAction(tr("Show result"), lambda: open_in_finder(row.dst)).setEnabled(dst_ok)
+        menu.addAction(tr("Log"), lambda: self.show_log(row)).setEnabled(bool(row.log))
+        menu.addSeparator()
+        self.add_file_actions(menu, row)
+        return menu
+
+    def show_row_menu(self, pos):
+        index = self.table.indexAt(pos)
+        if not index.isValid():
+            return
+        self.table.selectRow(index.row())
+        self.build_row_menu(index.data(Qt.UserRole + 1)).exec(self.table.viewport().mapToGlobal(pos))
+
+    def update_detail_bar(self, *_):
+        row = self.selected_row()
+        while self.detail_layout.count():
+            item = self.detail_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if row is None:
+            self.detail_bar.hide()
+            return
+        name = QLabel(f"<b>{row.src.name}</b>" + (f" · {row.note}" if row.note else ""))
+        name.setTextFormat(Qt.RichText)
+        self.detail_layout.addWidget(name, stretch=1)
+
+        def add(text, handler, enabled=True):
+            button = QPushButton(text)
+            button.setEnabled(enabled)
+            button.clicked.connect(handler)
+            self.detail_layout.addWidget(button)
+            return button
+
+        src_ok, dst_ok = row.src.exists(), row.dst.exists() and row.out_size is not None
+        if row.status == "planned":
+            first = bool(self.moved_up) and self.moved_up[0] == str(row.src)
+            add(tr("Process next"), lambda: self.move_up(row), not first)
+        if src_ok and dst_ok and row.status != "running":  # the result is being rewritten
+            add(tr("Compare"), lambda: self.compare(row))
+        elif src_ok and not dst_ok:
+            add(tr("Play original"), lambda: self.compare(row))
+        add(tr("Show original"), lambda: open_in_finder(row.src), src_ok)
+        if dst_ok:
+            add(tr("Show result"), lambda: open_in_finder(row.dst))
+        if row.log:
+            add(tr("Log"), lambda: self.show_log(row))
+        if dst_ok:
+            self.btn_file_actions = QPushButton(tr("File actions"))
+            menu = QMenu(self.btn_file_actions)
+            self.add_file_actions(menu, row)
+            self.btn_file_actions.setMenu(menu)
+            self.btn_file_actions.setEnabled(row.status != "running")
+            self.detail_layout.addWidget(self.btn_file_actions)
+        self.detail_bar.show()
+
+    def on_row_double_clicked(self, index):
+        row = index.data(Qt.UserRole + 1)
+        if row.src.exists() and row.has_result and row.status != "running":
+            self.compare(row)
+        elif row.log or not row.src.exists():
+            self.show_log(row)
+        else:
+            self.compare(row)  # nothing to compare with yet: just play the original
+
+    def compare(self, row):
+        has_result = row.dst.exists() and row.out_size is not None
+        CompareVideoDialog(row.src, row.dst if has_result else None, self).exec()
+
+    def show_log(self, row):
+        self.log_dialog = LogDialog(row, self)
+        self.log_dialog.show()
+
+    def handle_compare_action(self, action, row):
+        orig_path, comp_path = row.src, row.dst
+        ask = lambda title, text: QMessageBox.question(self, title, text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
+        try:
+            if action == "overwrite":
+                if not ask(tr("Overwrite"), tr("Really replace the original '{name}' with the compressed version?", name=orig_path.name)):
+                    return
+                new_orig_path = orig_path.with_name(comp_path.name)
+                shutil.copy2(comp_path, new_orig_path)
+                if new_orig_path != orig_path:
+                    orig_path.unlink()
+                self.model.update(row.src, note=tr("original replaced"))
+            elif action == "swap":
+                if not ask(tr("Swap"), tr("Really swap the original and the compressed version?")):
+                    return
+                temp_path = orig_path.with_name(orig_path.name + ".tmp")
+                shutil.move(orig_path, temp_path)
+                shutil.move(comp_path, orig_path)
+                shutil.move(temp_path, comp_path)
+                self.model.update(row.src, note=tr("swapped"))
+            elif action == "del_orig":
+                if not ask(tr("Delete"), tr("Really delete the original '{name}'?\nThis cannot be undone!", name=orig_path.name)):
+                    return
+                orig_path.unlink()
+                self.model.update(row.src, note=tr("original deleted"))
+            elif action == "del_comp":
+                if not ask(tr("Delete"), tr("Really delete the compressed version '{name}'?\nThis cannot be undone!", name=comp_path.name)):
+                    return
+                comp_path.unlink()
+                self.model.update(row.src, note=tr("result deleted"), out_size=None,
+                                  status="planned" if orig_path.exists() else row.status)
+                if orig_path.exists():
+                    self.schedule_scan()
+        except OSError as e:
+            QMessageBox.critical(self, tr("Error"), tr("The action failed: {error}", error=e))
+        self.update_detail_bar()
+
+    # ------------------------------------------------------------------ files
+    def clear_cache(self):
+        freed = clear_caches()
+        QMessageBox.information(self, tr("Cache"), tr("Cache cleared ({size} freed). Thumbnails and durations are read again at the next scan.", size=format_size(freed)))
+
+    def export_logs(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, tr("Export list as CSV"), "compression_log.csv", tr("CSV files (*.csv);;All files (*)"))
+        if not file_path:
+            return
+        try:
+            with open(file_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["file", "folder", "status", "duration_s", "original_bytes", "result_bytes", "saved_bytes", "ratio"])
+                for row in self.model.rows:
+                    saved = row.size - row.out_size if row.out_size is not None else ""
+                    writer.writerow([row.src.name, row.folder, row.status, f"{row.duration:.1f}" if row.duration else "",
+                                     row.size, row.out_size if row.out_size is not None else "", saved,
+                                     f"{row.ratio:.3f}" if row.ratio is not None else ""])
+            QMessageBox.information(self, tr("Success"), tr("Log exported."))
+        except OSError as e:
+            QMessageBox.critical(self, tr("Error"), tr("Export failed: {error}", error=e))
+
+    def save_defaults(self):
+        res, fps = self.combo_res.currentData(), self.combo_fps.currentData()
+        defaults = {
+            'src_dir': self.txt_src.text(),
+            'dst_dir': self.txt_dst.text(),
+            'limit_res': res is not None,
+            'max_res': str(res or 1920),
+            'limit_fps': fps is not None,
+            'max_fps': str(fps or 30),
+            'renderer_index': self.combo_renderer.currentIndex(),
+            'max_jobs': self.spin_jobs.value(),
+            'copy_aac': self.cb_copy_aac.isChecked(),
+            'crf': self.slider_crf.value(),
+            'preset': self.combo_preset.currentText(),
+            'vt_quality': self.slider_vt.value(),
+            'flatten': self.cb_flatten.isChecked(),
+            'postfix': self.txt_postfix.text(),
+            'excludes': self.txt_excludes.text(),
+            'overwrite': self.cb_overwrite.isChecked(),
+            'dry_run': self.cb_dry_run.isChecked(),
+        }
+        try:
+            path = settings_file()
+            settings = {}
+            if path.exists():
+                with open(path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            settings['compressor'] = defaults
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4)
+            QMessageBox.information(self, tr("Success"), tr("Default settings saved."))
+        except (OSError, json.JSONDecodeError) as e:
+            QMessageBox.critical(self, tr("Error"), tr("Saving the settings failed: {error}", error=e))
+
+    def load_defaults(self):
+        path = settings_file()
+        if not path.exists():
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                defaults = json.load(f).get('compressor', {})
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Failed to load settings: {e}")
+            return
+
+        def pick(combo, choices, value):
+            if value in choices:
+                combo.setCurrentIndex(choices.index(value))
+
+        if 'limit_res' in defaults or 'max_res' in defaults:
+            pick(self.combo_res, RESOLUTIONS, int(defaults.get('max_res', 1920)) if defaults.get('limit_res', True) else None)
+        if 'limit_fps' in defaults or 'max_fps' in defaults:
+            pick(self.combo_fps, FRAME_RATES, int(defaults.get('max_fps', 30)) if defaults.get('limit_fps', True) else None)
+        if 'renderer_index' in defaults: self.combo_renderer.setCurrentIndex(defaults['renderer_index'])
+        if 'max_jobs' in defaults: self.spin_jobs.setValue(defaults['max_jobs'])
+        if 'copy_aac' in defaults: self.cb_copy_aac.setChecked(defaults['copy_aac'])
+        if 'crf' in defaults: self.slider_crf.setValue(defaults['crf'])
+        if 'preset' in defaults: self.combo_preset.setCurrentText(defaults['preset'])
+        if 'vt_quality' in defaults: self.slider_vt.setValue(defaults['vt_quality'])
+        if 'flatten' in defaults: self.cb_flatten.setChecked(defaults['flatten'])
+        if 'postfix' in defaults: self.txt_postfix.setText(defaults['postfix'])
+        if 'excludes' in defaults: self.txt_excludes.setText(defaults['excludes'])
+        if 'overwrite' in defaults: self.cb_overwrite.setChecked(defaults['overwrite'])
+        if 'dry_run' in defaults: self.cb_dry_run.setChecked(defaults['dry_run'])
+        # Paths last: setting them schedules the automatic scan.
+        if 'src_dir' in defaults: self.txt_src.setText(defaults['src_dir'])
+        if 'dst_dir' in defaults: self.txt_dst.setText(defaults['dst_dir'])
