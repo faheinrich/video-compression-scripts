@@ -292,8 +292,8 @@ def test_example_video_is_smaller_and_equally_long(qapp, tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="reads the POSIX nice value")
-@pytest.mark.parametrize("low_priority,expected", [(True, 10), (False, 0)])
-def test_encoder_runs_with_lower_priority_when_asked(qapp, tmp_path, low_priority, expected):
+@pytest.mark.parametrize("low_priority", [True, False])
+def test_encoder_runs_with_lower_priority_when_asked(qapp, tmp_path, low_priority):
     from archive_helper.compressor.utils import get_video_info
     from archive_helper.compressor.workers import ArchiveWorker
 
@@ -308,7 +308,9 @@ def test_encoder_runs_with_lower_priority_when_asked(qapp, tmp_path, low_priorit
     nice = int(subprocess.run(["ps", "-o", "nice=", "-p", str(proc.pid)], capture_output=True, text=True).stdout.strip() or "-99")
     proc.kill()
     proc.communicate(timeout=30)
-    assert nice == expected
+    # relative to this process: CI runners do not start at nice 0
+    base = os.nice(0)
+    assert nice == (min(19, base + 10) if low_priority else base)
 
 
 # --- results are written to a partial file first ----------------------------------------------------------------------
