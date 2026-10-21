@@ -95,24 +95,36 @@ jobs:
       - name: Package size
         shell: bash
         run: ls -lh "$PACKAGE"
-      - uses: actions/upload-artifact@v4
+      # archive: false uploads the package itself. Otherwise GitHub wraps it in another zip on download, and macOS's
+      # Archive Utility fails to open the zip inside that zip. The artifact is named after the file.
+      - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.label }}
           path: ${{ env.PACKAGE }}
+          archive: false
           retention-days: 14
 
   release:
-    if: github.ref_type == 'tag'
+    # Manual runs go through the same steps up to the publishing, so the download and the file check are tested
+    # before a tag is pushed.
     needs: [meta, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: packages
           merge-multiple: true
+          skip-decompress: true   # the packages are zip files themselves and must stay zip files
+      - name: Check the packages
+        run: |
+          ls -l packages
+          test "$(ls packages | wc -l)" -eq 3
+          ls packages | grep -q "macOS-silicon.zip$"
+          ls packages | grep -q "Linux-x64.tar.gz$"
+          ls packages | grep -q "Windows-x64.zip$"
       - name: Publish the release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           TITLE: ${{ needs.meta.outputs.title }}
